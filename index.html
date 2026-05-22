@@ -1,0 +1,708 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>a2ui v0.9 surface renderer</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --border: #d0d0d0;
+    --card: #fff; --accent: #0066cc; --accent-fg: #fff; --danger: #b00020;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a; --fg: #e8e8e8; --muted: #999; --border: #333;
+      --card: #242424; --accent: #4a9eff; --accent-fg: #0a0a0a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header { padding: 12px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header .actions { margin-left: auto; display: flex; gap: 8px; }
+  header button { background: none; border: 1px solid var(--border); color: var(--fg); padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit; }
+  header button:hover { background: var(--card); }
+  main { max-width: 920px; margin: 0 auto; padding: 20px; }
+  .surface-root { display: flex; flex-direction: column; gap: 12px; }
+  .a2ui-row { display: flex; flex-direction: row; gap: 12px; flex-wrap: wrap; }
+  .a2ui-col { display: flex; flex-direction: column; gap: 12px; }
+  .a2ui-list { display: flex; gap: 8px; }
+  .a2ui-list.vertical { flex-direction: column; }
+  .a2ui-list.horizontal { flex-direction: row; flex-wrap: wrap; }
+  .a2ui-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .a2ui-text { white-space: pre-wrap; }
+  .a2ui-text.h1 { font-size: 1.6em; font-weight: 700; }
+  .a2ui-text.h2 { font-size: 1.35em; font-weight: 600; }
+  .a2ui-text.h3 { font-size: 1.15em; font-weight: 600; }
+  .a2ui-text.h4 { font-size: 1em; font-weight: 600; }
+  .a2ui-text.h5 { font-size: 0.9em; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  .a2ui-text.caption { font-size: 0.85em; color: var(--muted); }
+  .a2ui-divider.horizontal { height: 1px; background: var(--border); margin: 4px 0; width: 100%; }
+  .a2ui-divider.vertical { width: 1px; background: var(--border); margin: 0 4px; align-self: stretch; }
+  button.a2ui-btn { background: var(--accent); color: var(--accent-fg); border: none; padding: 6px 14px; border-radius: 6px; cursor: pointer; font: inherit; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; }
+  button.a2ui-btn.default { background: var(--card); color: var(--fg); border: 1px solid var(--border); }
+  button.a2ui-btn.borderless { background: transparent; color: var(--accent); border: none; padding: 6px 10px; text-decoration: underline; }
+  button.a2ui-btn:hover { filter: brightness(1.05); background-color: color-mix(in srgb, var(--accent) 12%, var(--card)); }
+  button.a2ui-btn:active { transform: translateY(1px); }
+  input.a2ui-input, select.a2ui-input, textarea.a2ui-input { background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; font: inherit; }
+  textarea.a2ui-input { resize: vertical; min-height: 80px; font-family: inherit; }
+  label.a2ui-lbl { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  label.a2ui-lbl.inline { flex-direction: row; align-items: center; gap: 8px; color: var(--fg); }
+  .a2ui-icon { display: inline-block; width: 1.1em; text-align: center; }
+  .a2ui-image { max-width: 100%; border-radius: 4px; }
+  .a2ui-image.icon { width: 24px; height: 24px; object-fit: contain; }
+  .a2ui-image.avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+  .a2ui-image.smallFeature { max-width: 160px; }
+  .a2ui-image.mediumFeature { max-width: 360px; }
+  .a2ui-image.largeFeature { max-width: 100%; }
+  .a2ui-image.header { width: 100%; max-height: 200px; object-fit: cover; }
+  .a2ui-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .a2ui-chip { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+  .a2ui-chip.selected { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
+  .modal { background: var(--card); border-radius: 8px; padding: 20px; max-width: 480px; width: 90%; max-height: 80vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .error { border: 1px solid var(--danger); color: var(--danger); padding: 12px; border-radius: 6px; margin: 12px 0; }
+  details.debug { margin-top: 20px; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 12px; }
+  details.debug summary { cursor: pointer; color: var(--muted); }
+  details.debug pre { background: var(--bg); padding: 8px; border-radius: 4px; overflow: auto; font-size: 11px; max-height: 300px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>a2ui v0.9 renderer</h1>
+  <span class="meta" id="meta">no payload</span>
+  <div class="actions">
+    <button id="btn-load">load file</button>
+    <button id="btn-copy-md">copy markdown</button>
+    <button id="btn-share">share URL</button>
+  </div>
+  <input type="file" id="file-in" accept=".json" hidden>
+</header>
+
+<main id="root">
+  <div class="empty" id="empty">
+    <p>No surface loaded. Provide one via:</p>
+    <pre><code>?surface=&lt;url&gt;
+?payload=&lt;base64-json&gt;
+postMessage({type:'a2ui.load', payload:{...}})</code></pre>
+    <p>Or load a JSON file:</p>
+    <button id="btn-load-empty">choose file…</button>
+    <p style="margin-top:24px"><button id="btn-demo">render demo</button></p>
+  </div>
+</main>
+
+<script type="module">
+import { html, render, nothing } from 'https://cdn.jsdelivr.net/npm/lit-html@3.2.1/+esm';
+
+const STORAGE_KEY = 'a2ui-render.config.v1';
+const cfg = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+
+const state = {
+  surface: null,
+  dataModel: {},
+  index: {},
+  rootId: null,
+  inputValues: {},
+  modalOpen: {},
+  error: null,
+};
+
+const log = (...args) => console.log('[a2ui]', ...args);
+
+function loadConfig() { return { daemonBase: cfg.daemonBase || null, ...cfg }; }
+function saveConfig(patch) { Object.assign(cfg, patch); localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg)); }
+
+function jsonPointerGet(obj, ptr) {
+  if (!ptr || ptr === '/') return obj;
+  const parts = ptr.replace(/^\//, '').split('/').map(p => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    cur = cur[p];
+  }
+  return cur;
+}
+
+function jsonPointerSet(obj, ptr, value) {
+  if (!ptr || ptr === '/') return value;
+  const parts = ptr.replace(/^\//, '').split('/').map(p => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  const last = parts.pop();
+  let cur = obj;
+  for (const p of parts) {
+    if (cur[p] == null || typeof cur[p] !== 'object') cur[p] = {};
+    cur = cur[p];
+  }
+  if (value === undefined) delete cur[last];
+  else cur[last] = value;
+  return obj;
+}
+
+function resolveDynamic(value, fallback) {
+  if (value == null) return fallback;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'object') {
+    if (typeof value.path === 'string') {
+      const v = jsonPointerGet(state.dataModel, value.path);
+      return v !== undefined ? v : fallback;
+    }
+    if (typeof value.call === 'string') {
+      return `[fn:${value.call}]`;
+    }
+  }
+  return fallback;
+}
+
+const renderers = {
+  Text: (c) => {
+    const text = resolveDynamic(c.text, '');
+    return html`<div class="a2ui-text ${c.variant || 'body'}" data-id=${c.id} ...=${a11y(c)}>${text}</div>`;
+  },
+
+  Image: (c) => {
+    const url = resolveDynamic(c.url, '');
+    const alt = resolveDynamic(c.description, '');
+    return html`<img class="a2ui-image ${c.variant || 'mediumFeature'}" data-id=${c.id}
+                     src=${url} alt=${alt}
+                     style=${`object-fit: ${c.fit || 'fill'};`}>`;
+  },
+
+  Icon: (c) => {
+    const name = typeof c.name === 'string' ? c.name : resolveDynamic(c.name, '');
+    if (c.name && typeof c.name === 'object' && c.name.svgPath) {
+      return html`<svg class="a2ui-icon" data-id=${c.id} viewBox="0 0 24 24" width="1em" height="1em">
+                    <path d=${c.name.svgPath} fill="currentColor"></path>
+                  </svg>`;
+    }
+    return html`<span class="a2ui-icon" data-id=${c.id} title=${name}>${iconGlyph(name)}</span>`;
+  },
+
+  Row: (c) => html`<div class="a2ui-row" data-id=${c.id}
+                        style=${flexStyle('row', c.justify, c.align)}>
+                    ${renderChildren(c.children)}
+                  </div>`,
+
+  Column: (c) => html`<div class="a2ui-col" data-id=${c.id}
+                            style=${flexStyle('column', c.justify, c.align)}>
+                       ${renderChildren(c.children)}
+                     </div>`,
+
+  List: (c) => html`<div class="a2ui-list ${c.direction || 'vertical'}" data-id=${c.id}
+                         style=${listStyle(c.align)}>
+                     ${renderChildren(c.children)}
+                   </div>`,
+
+  Card: (c) => html`<div class="a2ui-card" data-id=${c.id}>${renderById(c.child)}</div>`,
+
+  Modal: (c) => {
+    const trigger = renderById(c.trigger);
+    const open = !!state.modalOpen[c.id];
+    return html`
+      <div data-id=${c.id}
+           @click=${(e) => { if (!open) { state.modalOpen[c.id] = true; rerender(); }}}>
+        ${trigger}
+      </div>
+      ${open ? html`
+        <div class="modal-backdrop" @click=${(e) => { if (e.target === e.currentTarget) { state.modalOpen[c.id] = false; rerender(); }}}>
+          <div class="modal">
+            ${renderById(c.content)}
+            <button class="a2ui-btn default" @click=${() => { state.modalOpen[c.id] = false; rerender(); }}>Close</button>
+          </div>
+        </div>` : nothing}
+    `;
+  },
+
+  Divider: (c) => html`<div class="a2ui-divider ${c.axis || 'horizontal'}" data-id=${c.id}></div>`,
+
+  Button: (c) => html`
+    <button class="a2ui-btn ${c.variant || 'default'}" data-id=${c.id}
+            @click=${() => dispatchAction(c.action, c.id)}>
+      ${renderById(c.child)}
+    </button>
+  `,
+
+  TextField: (c) => {
+    const label = resolveDynamic(c.label, '');
+    const value = state.inputValues[c.id] ?? resolveDynamic(c.value, '');
+    const inputType = textFieldType(c.variant);
+    const isLong = c.variant === 'longText';
+    return html`
+      <label class="a2ui-lbl" data-id=${c.id}>
+        ${label ? html`<span>${label}</span>` : nothing}
+        ${isLong
+          ? html`<textarea class="a2ui-input" .value=${value}
+                          pattern=${c.validationRegexp || nothing}
+                          @input=${(e) => onInputChange(c, e.target.value)}></textarea>`
+          : html`<input class="a2ui-input" type=${inputType} .value=${String(value)}
+                       pattern=${c.validationRegexp || nothing}
+                       @input=${(e) => onInputChange(c, e.target.value)}>`}
+      </label>
+    `;
+  },
+
+  CheckBox: (c) => {
+    const label = resolveDynamic(c.label, '');
+    const checked = state.inputValues[c.id] ?? resolveDynamic(c.value, false);
+    return html`
+      <label class="a2ui-lbl inline" data-id=${c.id}>
+        <input type="checkbox" .checked=${!!checked}
+               @change=${(e) => onInputChange(c, e.target.checked)}>
+        <span>${label}</span>
+      </label>
+    `;
+  },
+
+  ChoicePicker: (c) => {
+    const label = resolveDynamic(c.label, '');
+    const selected = state.inputValues[c.id] ?? resolveDynamic(c.value, []) ?? [];
+    const isMulti = c.variant === 'multipleSelection';
+    const opts = c.options || [];
+    if (c.displayStyle === 'chips') {
+      return html`
+        <div data-id=${c.id}>
+          ${label ? html`<div style="font-size:13px; color:var(--muted); margin-bottom:4px;">${label}</div>` : nothing}
+          <div class="a2ui-chips">
+            ${opts.map((o) => html`
+              <span class="a2ui-chip ${selected.includes(o.value) ? 'selected' : ''}"
+                    @click=${() => toggleChoice(c, o.value, isMulti)}>
+                ${resolveDynamic(o.label, o.value)}
+              </span>`)}
+          </div>
+        </div>`;
+    }
+    if (isMulti) {
+      return html`
+        <div data-id=${c.id}>
+          ${label ? html`<div style="font-size:13px; color:var(--muted); margin-bottom:4px;">${label}</div>` : nothing}
+          ${opts.map((o) => html`
+            <label class="a2ui-lbl inline">
+              <input type="checkbox" .checked=${selected.includes(o.value)}
+                     @change=${() => toggleChoice(c, o.value, true)}>
+              <span>${resolveDynamic(o.label, o.value)}</span>
+            </label>`)}
+        </div>`;
+    }
+    const single = Array.isArray(selected) ? (selected[0] || '') : selected;
+    return html`
+      <label class="a2ui-lbl" data-id=${c.id}>
+        ${label ? html`<span>${label}</span>` : nothing}
+        <select class="a2ui-input" .value=${single}
+                @change=${(e) => onInputChange(c, [e.target.value])}>
+          ${opts.map((o) => html`<option value=${o.value}>${resolveDynamic(o.label, o.value)}</option>`)}
+        </select>
+      </label>`;
+  },
+
+  Slider: (c) => {
+    const label = resolveDynamic(c.label, '');
+    const value = state.inputValues[c.id] ?? resolveDynamic(c.value, c.min ?? 0);
+    return html`
+      <label class="a2ui-lbl" data-id=${c.id}>
+        ${label ? html`<span>${label}: ${value}</span>` : nothing}
+        <input class="a2ui-input" type="range"
+               min=${c.min ?? 0} max=${c.max}
+               .value=${String(value)}
+               @input=${(e) => onInputChange(c, Number(e.target.value))}>
+      </label>`;
+  },
+};
+
+function a11y(c) {
+  if (!c.accessibility) return '';
+  const lab = resolveDynamic(c.accessibility.label, '');
+  const desc = resolveDynamic(c.accessibility.description, '');
+  return lab || desc ? `aria-label="${lab}" aria-description="${desc}"` : '';
+}
+
+function flexStyle(direction, justify, align) {
+  const j = justify ? `justify-content: ${cssFlex(justify)};` : '';
+  const a = align ? `align-items: ${cssFlex(align)};` : '';
+  return `${j} ${a}`.trim();
+}
+
+function listStyle(align) { return align ? `align-items: ${cssFlex(align)};` : ''; }
+
+function cssFlex(v) {
+  return { start: 'flex-start', end: 'flex-end', center: 'center', stretch: 'stretch',
+           spaceBetween: 'space-between', spaceAround: 'space-around',
+           spaceEvenly: 'space-evenly' }[v] || v;
+}
+
+function textFieldType(variant) {
+  return { number: 'number', obscured: 'password', shortText: 'text', longText: 'text' }[variant] || 'text';
+}
+
+function iconGlyph(name) {
+  const map = {
+    check: '✓', close: '✗', info: 'ⓘ', warning: '⚠', error: '⚠', help: '?',
+    add: '+', delete: '🗑', edit: '✎', search: '🔍', share: '↗', send: '→',
+    home: '⌂', settings: '⚙', refresh: '↻', menu: '☰', moreVert: '⋮', moreHoriz: '⋯',
+    arrowBack: '←', arrowForward: '→', skipNext: '⏭', skipPrevious: '⏮',
+    play: '▶', pause: '⏸', stop: '⏹', fastForward: '⏩', rewind: '⏪',
+    favorite: '♥', favoriteOff: '♡', star: '★', starOff: '☆', starHalf: '★',
+    lock: '🔒', lockOpen: '🔓', visibility: '👁', visibilityOff: '🙈',
+    mail: '✉', phone: '📞', call: '📞', person: '👤', accountCircle: '◉',
+    folder: '📁', attachFile: '📎', download: '⬇', upload: '⬆',
+    photo: '🖼', camera: '📷', payment: '💳', shoppingCart: '🛒',
+    notifications: '🔔', notificationsOff: '🔕',
+    volumeUp: '🔊', volumeDown: '🔉', volumeMute: '🔇', volumeOff: '🔈',
+    locationOn: '📍', event: '📅', calendarToday: '📅', print: '🖨',
+  };
+  return map[name] || '◆';
+}
+
+function renderChildren(childList) {
+  if (!childList) return [];
+  if (Array.isArray(childList)) return childList.map(renderById);
+  if (childList.componentId && childList.path) {
+    const data = jsonPointerGet(state.dataModel, childList.path);
+    if (!Array.isArray(data)) return [html`<div class="error">template path ${childList.path} is not an array</div>`];
+    return data.map((item, i) => renderTemplate(childList.componentId, item, i));
+  }
+  return [];
+}
+
+function renderTemplate(componentId, item, index) {
+  const original = state.dataModel;
+  state.dataModel = { ...original, '@item': item, '@index': index };
+  const result = renderById(componentId);
+  state.dataModel = original;
+  return result;
+}
+
+function renderById(id) {
+  if (!id) return nothing;
+  const c = state.index[id];
+  if (!c) return html`<div class="error">unknown component: ${id}</div>`;
+  const r = renderers[c.component];
+  if (!r) return html`<div class="error">unsupported component: ${c.component}</div>`;
+  return r(c);
+}
+
+function onInputChange(c, value) {
+  state.inputValues[c.id] = value;
+  if (c.value && typeof c.value === 'object' && c.value.path) {
+    jsonPointerSet(state.dataModel, c.value.path, value);
+  }
+  rerender();
+}
+
+function toggleChoice(c, value, isMulti) {
+  const cur = (state.inputValues[c.id] ?? resolveDynamic(c.value, []) ?? []).slice();
+  if (isMulti) {
+    const i = cur.indexOf(value);
+    if (i >= 0) cur.splice(i, 1); else cur.push(value);
+    onInputChange(c, cur);
+  } else {
+    onInputChange(c, [value]);
+  }
+}
+
+const pendingRequests = new Map();
+
+function dispatchAction(action, sourceId) {
+  if (!action) return;
+  if (action.functionCall) {
+    handleFunctionCall(action.functionCall, sourceId);
+  } else if (action.event) {
+    sendEventToHost(action.event, sourceId);
+  }
+}
+
+function handleFunctionCall(fn, sourceId) {
+  const args = resolveArgs(fn.args || {});
+  log('functionCall', fn.call, args);
+  switch (fn.call) {
+    case 'openUrl':
+      if (args.url) window.open(args.url, '_blank', 'noopener');
+      break;
+    case 'copyToClipboard':
+      if (args.value != null) navigator.clipboard.writeText(String(args.value));
+      break;
+    case 'openChash':
+      hostBridge('openChash', { chash: args.chash, sourceId });
+      break;
+    default:
+      hostBridge('functionCall', { call: fn.call, args, sourceId });
+  }
+}
+
+function resolveArgs(args) {
+  const out = {};
+  for (const [k, v] of Object.entries(args)) out[k] = resolveDynamic(v, v);
+  return out;
+}
+
+function sendEventToHost(event, sourceId) {
+  const ctx = resolveArgs(event.context || {});
+  log('event', event.name, ctx, 'from', sourceId);
+  hostBridge('event', { name: event.name, context: ctx, sourceId, dataModel: state.dataModel });
+}
+
+function hostBridge(method, params) {
+  const hasParent = window.parent && window.parent !== window;
+  if (hasParent) {
+    const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const panel = method === 'openChash' ? showInfo(`chash:${params.chash}`, 'Requesting from host…') : null;
+    pendingRequests.set(requestId, { method, params, panel });
+    window.parent.postMessage({ type: 'a2ui.request', method, requestId, params }, '*');
+    setTimeout(() => {
+      const p = pendingRequests.get(requestId);
+      if (p) {
+        pendingRequests.delete(requestId);
+        if (p.panel) updateInfo(p.panel, `${method} timeout`,
+          'No response from host within 10s. Host must reply with {type:"a2ui.response", requestId, result|error}.');
+      }
+    }, 10000);
+    return;
+  }
+  const { daemonBase } = loadConfig();
+  if (daemonBase && method === 'openChash') {
+    fetch(`${daemonBase}/chash/${encodeURIComponent(params.chash)}`)
+      .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+      .then(d => showInfo(`chash:${params.chash}`, d.text || JSON.stringify(d, null, 2)))
+      .catch(e => showInfo(`chash:${params.chash}`, `Fetch failed: ${e}`));
+    return;
+  }
+  showInfo(`${method} not handled`,
+    `Standalone mode — no host bridge available.\n\n` +
+    `Embed this renderer in a host that bridges to nexus (Claude Code MCP UI ` +
+    `resource preferred), or run a sidecar HTTP proxy and set:\n` +
+    `  localStorage["${STORAGE_KEY}"] = '{"daemonBase":"http://localhost:PORT"}'\n\n` +
+    `Method: ${method}\nParams: ${JSON.stringify(params, null, 2)}`);
+}
+
+function showInfo(title, body) {
+  const el = document.createElement('div');
+  el.className = 'modal-backdrop';
+  el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+  const m = document.createElement('div');
+  m.className = 'modal';
+  const t = document.createElement('div'); t.style.fontWeight = '600'; t.textContent = title;
+  const p = document.createElement('pre'); p.style.cssText = 'white-space:pre-wrap; font-family:ui-monospace,monospace; font-size:12px; margin:0;';
+  p.textContent = body;
+  const close = document.createElement('button'); close.className = 'a2ui-btn default'; close.textContent = 'Close';
+  close.addEventListener('click', () => el.remove());
+  m.append(t, p, close);
+  el.appendChild(m);
+  document.body.appendChild(el);
+  return el;
+}
+
+function updateInfo(panel, title, body) {
+  if (!panel || !panel.isConnected) return;
+  panel.querySelector('div').textContent = title;
+  panel.querySelector('pre').textContent = body;
+}
+
+function view() {
+  if (state.error) return html`<div class="error">${state.error}</div>`;
+  if (!state.rootId) return nothing;
+  return html`
+    <div class="surface-root">${renderById(state.rootId)}</div>
+    <details class="debug">
+      <summary>debug · ${Object.keys(state.index).length} components · ${Object.keys(state.dataModel).length} data keys</summary>
+      <pre>${JSON.stringify({surface: state.surface, dataModel: state.dataModel}, null, 2)}</pre>
+    </details>`;
+}
+
+function rerender() {
+  document.getElementById('empty')?.remove();
+  render(view(), document.getElementById('root'));
+}
+
+function ingestComponents(componentArray) {
+  if (!Array.isArray(componentArray)) throw new Error('components must be an array');
+  const idx = {};
+  for (const c of componentArray) {
+    if (!c.id) throw new Error('component missing id');
+    if (!c.component) throw new Error(`component ${c.id} missing 'component' discriminator`);
+    idx[c.id] = c;
+  }
+  if (!idx.root) throw new Error('no component with id="root" found');
+  state.index = { ...state.index, ...idx };
+  state.rootId = 'root';
+}
+
+function applyMessage(msg) {
+  if (msg.createSurface) {
+    state.surface = { surfaceId: msg.createSurface.surfaceId, catalogId: msg.createSurface.catalogId };
+    state.index = {};
+    state.dataModel = {};
+    state.inputValues = {};
+    state.modalOpen = {};
+  } else if (msg.updateComponents) {
+    if (msg.updateComponents.surfaceId && !state.surface) {
+      state.surface = { surfaceId: msg.updateComponents.surfaceId };
+    }
+    ingestComponents(msg.updateComponents.components);
+  } else if (msg.updateDataModel) {
+    const path = msg.updateDataModel.path || '/';
+    if ('value' in msg.updateDataModel) jsonPointerSet(state.dataModel, path, msg.updateDataModel.value);
+    else jsonPointerSet(state.dataModel, path, undefined);
+  } else if (msg.deleteSurface) {
+    state.surface = null; state.index = {}; state.dataModel = {}; state.rootId = null;
+  }
+}
+
+function setSurface(payload) {
+  try {
+    state.error = null;
+    if (payload.version === 'v0.9' && (payload.createSurface || payload.updateComponents || payload.updateDataModel || payload.deleteSurface)) {
+      applyMessage(payload);
+    } else if (Array.isArray(payload.messages)) {
+      for (const m of payload.messages) applyMessage(m);
+    } else if (Array.isArray(payload.components)) {
+      state.surface = { surfaceId: payload.surfaceId || 'flat', catalogId: payload.catalogId || 'a2ui.basic' };
+      state.dataModel = payload.dataModel || {};
+      state.index = {};
+      ingestComponents(payload.components);
+    } else {
+      throw new Error('payload not recognized (need v0.9 message envelope, {messages:[...]}, or flat {components:[...]})');
+    }
+    const meta = document.getElementById('meta');
+    if (state.surface) meta.textContent = `v0.9 · ${state.surface.surfaceId} · ${Object.keys(state.index).length} components`;
+    rerender();
+  } catch (e) {
+    state.error = e.message;
+    rerender();
+  }
+}
+
+function toMarkdown() {
+  const lines = [];
+  const walk = (id, depth = 0) => {
+    const c = state.index[id];
+    if (!c) return;
+    const ind = '  '.repeat(depth);
+    switch (c.component) {
+      case 'Text': {
+        const t = resolveDynamic(c.text, '');
+        const prefix = { h1: '# ', h2: '## ', h3: '### ', h4: '#### ', h5: '##### ', caption: '_', body: '' }[c.variant || 'body'] || '';
+        const suffix = c.variant === 'caption' ? '_' : '';
+        lines.push(ind + prefix + String(t).replace(/\n/g, '\n' + ind) + suffix);
+        break;
+      }
+      case 'Divider': lines.push(ind + '---'); break;
+      case 'Image': lines.push(ind + `![${resolveDynamic(c.description, '')}](${resolveDynamic(c.url, '')})`); break;
+      case 'Icon': lines.push(ind + `[icon:${typeof c.name === 'string' ? c.name : 'custom'}]`); break;
+      case 'Card': walk(c.child, depth); break;
+      case 'Row': case 'Column': case 'List':
+        if (Array.isArray(c.children)) c.children.forEach((cid) => walk(cid, depth));
+        break;
+      case 'Modal': walk(c.trigger, depth); break;
+      case 'Button': {
+        const childText = state.index[c.child]?.component === 'Text' ? resolveDynamic(state.index[c.child].text, c.id) : c.id;
+        if (c.action?.functionCall?.call === 'openUrl' && c.action.functionCall.args?.url) {
+          lines.push(ind + `[${childText}](${c.action.functionCall.args.url})`);
+        } else {
+          lines.push(ind + `[${childText}]`);
+        }
+        break;
+      }
+      case 'TextField': case 'CheckBox': case 'ChoicePicker': case 'Slider':
+        lines.push(ind + `[${c.component}: ${resolveDynamic(c.label, c.id)}]`);
+        break;
+      default: lines.push(ind + `[${c.component}]`);
+    }
+  };
+  walk(state.rootId);
+  return lines.join('\n');
+}
+
+const DEMO = {
+  version: 'v0.9',
+  messages: [
+    { version: 'v0.9', createSurface: { surfaceId: 'demo.nx_answer', catalogId: 'a2ui.basic.v0_9' }},
+    { version: 'v0.9', updateDataModel: { path: '/', value: {
+      synthesis: 'A2UI v0.9 is a declarative UI protocol for agent-generated interfaces. Surfaces are described as JSON; renderers map components to native widgets via per-host catalogs. This is a v0.9-conformant demo.',
+      citations: [
+        { title: 'a2ui v0.9 specification', excerpt: 'Server-to-client messages: createSurface, updateComponents, updateDataModel, deleteSurface. Components are addressed in a flat array; id="root" anchors the tree.', chash: 'demo-1-abcd1234' },
+        { title: 'Basic Catalog reference', excerpt: 'Eighteen components covering text, layout (Row/Column/List/Card), media (Image/Icon/Video/AudioPlayer), input (TextField/CheckBox/ChoicePicker/Slider/DateTimeInput), and interaction (Button/Modal/Tabs/Divider).', chash: 'demo-2-ef567890' }
+      ]
+    }}},
+    { version: 'v0.9', updateComponents: { surfaceId: 'demo.nx_answer', components: [
+      { id: 'root', component: 'Column', children: ['synth', 'div1', 'cite-title', 'citations'] },
+      { id: 'synth', component: 'Text', text: { path: '/synthesis' } },
+      { id: 'div1', component: 'Divider' },
+      { id: 'cite-title', component: 'Text', text: 'Citations', variant: 'h5' },
+      { id: 'citations', component: 'List', direction: 'vertical', children: { componentId: 'cite-card', path: '/citations' } },
+      { id: 'cite-card', component: 'Card', child: 'cite-card-col' },
+      { id: 'cite-card-col', component: 'Column', children: ['cite-title-tpl', 'cite-excerpt-tpl', 'cite-actions'] },
+      { id: 'cite-title-tpl', component: 'Text', text: { path: '/@item/title' }, variant: 'h4' },
+      { id: 'cite-excerpt-tpl', component: 'Text', text: { path: '/@item/excerpt' }, variant: 'body' },
+      { id: 'cite-actions', component: 'Row', children: ['cite-open-btn', 'cite-copy-btn'] },
+      { id: 'cite-open-btn', component: 'Button', variant: 'primary', child: 'cite-open-label',
+        action: { functionCall: { call: 'openChash', args: { chash: { path: '/@item/chash' } } } } },
+      { id: 'cite-open-label', component: 'Text', text: 'Open chunk' },
+      { id: 'cite-copy-btn', component: 'Button', variant: 'borderless', child: 'cite-copy-label',
+        action: { functionCall: { call: 'copyToClipboard', args: { value: { path: '/@item/excerpt' } } } } },
+      { id: 'cite-copy-label', component: 'Text', text: 'Copy excerpt' },
+    ]}}
+  ]
+};
+
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m !== 'object') return;
+  if (m.type === 'a2ui.load' && m.payload) setSurface(m.payload);
+  if (m.type === 'a2ui.config') saveConfig(m.config || {});
+  if (m.type === 'a2ui.message') applyMessage(m.message), rerender();
+  if (m.type === 'a2ui.response' && m.requestId) {
+    const p = pendingRequests.get(m.requestId);
+    if (!p) return;
+    pendingRequests.delete(m.requestId);
+    if (p.panel) {
+      if (m.error) updateInfo(p.panel, `${p.method} error`, m.error);
+      else updateInfo(p.panel, p.method === 'openChash' ? `chash:${p.params.chash}` : p.method,
+                      m.result?.text || m.result?.content || JSON.stringify(m.result, null, 2));
+    }
+  }
+});
+
+document.getElementById('btn-load').addEventListener('click', () => document.getElementById('file-in').click());
+document.getElementById('btn-load-empty')?.addEventListener('click', () => document.getElementById('file-in').click());
+document.getElementById('file-in').addEventListener('change', async (e) => {
+  if (e.target.files[0]) {
+    try { setSurface(JSON.parse(await e.target.files[0].text())); }
+    catch (err) { state.error = `parse failed: ${err.message}`; rerender(); }
+  }
+});
+document.getElementById('btn-demo')?.addEventListener('click', () => setSurface(DEMO));
+document.getElementById('btn-copy-md').addEventListener('click', async () => {
+  if (!state.rootId) return;
+  await navigator.clipboard.writeText(toMarkdown());
+  const btn = document.getElementById('btn-copy-md');
+  const orig = btn.textContent; btn.textContent = 'copied!';
+  setTimeout(() => { btn.textContent = orig; }, 1200);
+});
+document.getElementById('btn-share').addEventListener('click', async () => {
+  if (!state.surface) return;
+  const b64 = btoa(JSON.stringify({version: 'v0.9', messages: [
+    {version:'v0.9', createSurface:{surfaceId: state.surface.surfaceId, catalogId: state.surface.catalogId || 'a2ui.basic.v0_9'}},
+    {version:'v0.9', updateDataModel:{path:'/', value: state.dataModel}},
+    {version:'v0.9', updateComponents:{surfaceId: state.surface.surfaceId, components: Object.values(state.index)}}
+  ]}));
+  const url = `${location.origin}${location.pathname}?payload=${encodeURIComponent(b64)}`;
+  await navigator.clipboard.writeText(url);
+  const btn = document.getElementById('btn-share');
+  const orig = btn.textContent; btn.textContent = 'URL copied!';
+  setTimeout(() => { btn.textContent = orig; }, 1200);
+});
+
+const params = new URLSearchParams(location.search);
+if (params.get('surface')) {
+  fetch(params.get('surface')).then(r => r.json()).then(setSurface).catch((e) => { state.error = `fetch failed: ${e.message}`; rerender(); });
+} else if (params.get('payload')) {
+  try { setSurface(JSON.parse(atob(decodeURIComponent(params.get('payload'))))); }
+  catch (e) { state.error = `decode failed: ${e.message}`; rerender(); }
+} else if (params.get('demo') === '1') {
+  setSurface(DEMO);
+}
+</script>
+</body>
+</html>

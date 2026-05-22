@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>a2ui surface host bridge</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  header {
+    padding: 8px 16px;
+    border-bottom: 1px solid #d0d0d0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  @media (prefers-color-scheme: dark) { header { border-color: #333; } }
+  header h1 { font-size: 13px; margin: 0; font-weight: 600; }
+  header label { font-size: 12px; color: #666; display: flex; gap: 6px; align-items: center; }
+  header input[type="text"] {
+    font: inherit; padding: 4px 8px; border-radius: 4px;
+    border: 1px solid #d0d0d0; background: transparent; color: inherit;
+    min-width: 280px;
+  }
+  header button { font: inherit; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+  .status { margin-left: auto; font-size: 12px; }
+  .status.ok { color: #2e7d32; }
+  .status.err { color: #b00020; }
+  iframe { flex: 1; border: none; width: 100%; }
+  .log {
+    height: 140px;
+    overflow: auto;
+    background: rgba(0,0,0,0.04);
+    padding: 6px 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 11px;
+    border-top: 1px solid #d0d0d0;
+    flex-shrink: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    .log { background: rgba(255,255,255,0.04); border-color: #333; }
+  }
+  .log .req { color: #0066cc; }
+  .log .res { color: #2e7d32; }
+  .log .err { color: #b00020; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>host bridge</h1>
+  <label>renderer: <input type="text" id="renderer-url" value="./index.html?demo=1"></label>
+  <label>backend: <input type="text" id="backend-url" placeholder="http://localhost:PORT or 'mock'"></label>
+  <button id="reload">reload</button>
+  <span class="status" id="status">unconfigured</span>
+</header>
+
+<iframe id="frame" sandbox="allow-scripts allow-same-origin" src="./index.html?demo=1"></iframe>
+
+<div class="log" id="log"></div>
+
+<script type="module">
+const CFG_KEY = 'a2ui-host-bridge.v1';
+const cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+
+const frame = document.getElementById('frame');
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const rendererInput = document.getElementById('renderer-url');
+const backendInput = document.getElementById('backend-url');
+
+if (cfg.rendererUrl) rendererInput.value = cfg.rendererUrl;
+if (cfg.backendUrl) backendInput.value = cfg.backendUrl;
+
+function logLine(cls, msg) {
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `${new Date().toISOString().slice(11, 23)}  ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(ok, text) {
+  statusEl.className = 'status ' + (ok ? 'ok' : 'err');
+  statusEl.textContent = text;
+}
+
+function saveCfg() {
+  cfg.rendererUrl = rendererInput.value.trim();
+  cfg.backendUrl = backendInput.value.trim();
+  localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+}
+
+const MOCK_BACKEND = {
+  async openChash({ chash }) {
+    return {
+      text: `[mock] chash:${chash}\n\nThis is a stub response from the host-bridge mock backend. Configure a real backend URL (HTTP sidecar) or replace window.hostBridgeResolver with a custom resolver function to plug into a real nexus daemon.`,
+      source: 'mock',
+    };
+  },
+  async runSkill({ name, args }) {
+    return { result: `[mock] skill ${name} called with ${JSON.stringify(args)}` };
+  },
+};
+
+const HTTP_BACKEND = (baseUrl) => ({
+  async openChash({ chash }) {
+    const resp = await fetch(`${baseUrl}/chash/${encodeURIComponent(chash)}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${baseUrl}/chash/...`);
+    return await resp.json();
+  },
+  async runSkill({ name, args }) {
+    const resp = await fetch(`${baseUrl}/skill/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(args || {}),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${baseUrl}/skill/...`);
+    return await resp.json();
+  },
+});
+
+function getBackend() {
+  if (window.hostBridgeResolver && typeof window.hostBridgeResolver === 'object') {
+    return { backend: window.hostBridgeResolver, label: 'custom' };
+  }
+  const url = backendInput.value.trim();
+  if (!url) return { backend: null, label: 'none' };
+  if (url === 'mock') return { backend: MOCK_BACKEND, label: 'mock' };
+  if (/^https?:\/\//.test(url)) return { backend: HTTP_BACKEND(url.replace(/\/$/, '')), label: url };
+  return { backend: null, label: `invalid: ${url}` };
+}
+
+function updateStatus() {
+  const { label } = getBackend();
+  if (label === 'none' || label.startsWith('invalid')) setStatus(false, `backend: ${label}`);
+  else setStatus(true, `backend: ${label}`);
+}
+
+async function handleRequest(m) {
+  const { backend, label } = getBackend();
+  logLine('req', `→ ${m.method} ${JSON.stringify(m.params).slice(0, 80)}`);
+
+  if (!backend) {
+    logLine('err', `← no backend configured (${label})`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: `Host bridge has no backend configured. Set backend URL or window.hostBridgeResolver.`,
+    }, '*');
+    return;
+  }
+
+  const handler = backend[m.method];
+  if (!handler) {
+    logLine('err', `← unknown method: ${m.method}`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: `Unknown method: ${m.method}`,
+    }, '*');
+    return;
+  }
+
+  try {
+    const result = await handler(m.params || {});
+    logLine('res', `← ${m.method} ${JSON.stringify(result).slice(0, 80)}`);
+    frame.contentWindow.postMessage({ type: 'a2ui.response', requestId: m.requestId, result }, '*');
+  } catch (err) {
+    logLine('err', `← ${m.method} error: ${err.message}`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId, error: err.message,
+    }, '*');
+  }
+}
+
+window.addEventListener('message', (e) => {
+  if (e.source !== frame.contentWindow) return;
+  const m = e.data;
+  if (!m || typeof m !== 'object') return;
+
+  if (m.type === 'a2ui.request' && m.requestId && m.method) {
+    handleRequest(m);
+    return;
+  }
+  if (m.type === 'a2ui.action') {
+    logLine('req', `↗ action ${m.action?.name} from ${m.sourceId}`);
+    return;
+  }
+  if (m.type === 'a2ui.openChash') {
+    handleRequest({
+      type: 'a2ui.request', requestId: `legacy-${Date.now()}`,
+      method: 'openChash', params: { chash: m.chash, sourceId: m.sourceId },
+    });
+    return;
+  }
+});
+
+document.getElementById('reload').addEventListener('click', () => {
+  saveCfg();
+  frame.src = rendererInput.value || './index.html';
+  updateStatus();
+  logLine('req', `reloaded renderer: ${frame.src}`);
+});
+
+backendInput.addEventListener('change', () => {
+  saveCfg();
+  updateStatus();
+});
+
+updateStatus();
+logLine('req', `host bridge ready · renderer: ${frame.src}`);
+
+window.a2uiHostBridge = {
+  loadSurface(payload) {
+    frame.contentWindow.postMessage({ type: 'a2ui.load', payload }, '*');
+  },
+  setConfig(config) {
+    frame.contentWindow.postMessage({ type: 'a2ui.config', config }, '*');
+  },
+  setResolver(resolver) {
+    window.hostBridgeResolver = resolver;
+    updateStatus();
+  },
+};
+</script>
+</body>
+</html>
