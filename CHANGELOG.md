@@ -4,6 +4,16 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.0.4] — 2026-05-22
+
+Action-context bug fix + clearer empty-backend UX. No new features.
+
+### Fixed
+- Renderer (`index.html`) `Button` now preserves render-time data-model context (including `@item` template alias) across the gap between render and click. Previously, `Surface` actions inside a template iteration emitted unresolved `{path: "/@item/..."}` payloads because `state.dataModel` was restored to the parent context before the click handler fired. New `withDataModel(model, fn)` helper installs the captured context temporarily during dispatch. Visible symptom: `openChash` action payload contained the raw DataPath instead of the resolved chash string when fired from a List-template Button.
+
+### Changed
+- Host-bridge (`host-bridge.html`) shows a prominent banner when no backend is configured, explaining the consequence (surface actions return errors) and offering two explicit affordances: "Try mock (stub responses)" and "Enter sidecar URL…". Previous behavior was silent — backend was just "none" in the status pill, and surface actions failed with no UI feedback. The mock backend is now opt-in via the banner button, not a hidden default.
+
 ## [0.0.3] — 2026-05-22
 
 First Pyodide-augmented release plus a load-bearing renderer fix.

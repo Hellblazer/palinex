@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "palinex"
-version = "0.0.3"
+version = "0.0.4"
 description = "Typed Python builders + single-file HTML renderer for a2ui v0.9 surfaces. palin- (again) + nexus (bond) — surfaces get rewritten."
 readme = "README.md"
 requires-python = ">=3.10"

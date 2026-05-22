@@ -151,6 +151,14 @@ function jsonPointerSet(obj, ptr, value) {
   return obj;
 }
 
+function withDataModel(model, fn) {
+  // Temporarily install `model` as state.dataModel (used to preserve @item /
+  // template context across the gap between render-time and click-time).
+  const original = state.dataModel;
+  state.dataModel = model;
+  try { return fn(); } finally { state.dataModel = original; }
+}
+
 function resolveDynamic(value, fallback) {
   if (value == null) return fallback;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
@@ -228,12 +236,15 @@ const renderers = {
 
   Divider: (c) => html`<div class="a2ui-divider ${c.axis || 'horizontal'}" data-id=${c.id}></div>`,
 
-  Button: (c) => html`
-    <button class="a2ui-btn ${c.variant || 'default'}" data-id=${c.id}
-            @click=${() => dispatchAction(c.action, c.id)}>
-      ${renderById(c.child)}
-    </button>
-  `,
+  Button: (c) => {
+    const ctx = state.dataModel;
+    return html`
+      <button class="a2ui-btn ${c.variant || 'default'}" data-id=${c.id}
+              @click=${() => withDataModel(ctx, () => dispatchAction(c.action, c.id))}>
+        ${renderById(c.child)}
+      </button>
+    `;
+  },
 
   TextField: (c) => {
     const label = resolveDynamic(c.label, '');

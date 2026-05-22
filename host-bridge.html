@@ -45,6 +45,25 @@
   .log .req { color: #0066cc; }
   .log .res { color: #2e7d32; }
   .log .err { color: #b00020; }
+  .backend-empty {
+    padding: 10px 16px; background: #fff8e1; border-bottom: 1px solid #f0c040;
+    color: #6b4500; font-size: 13px; display: flex; gap: 12px; align-items: center;
+    flex-wrap: wrap;
+  }
+  @media (prefers-color-scheme: dark) {
+    .backend-empty { background: #3a2e10; border-color: #806020; color: #f0c060; }
+  }
+  .backend-empty strong { color: inherit; }
+  .backend-empty .opts { display: flex; gap: 6px; margin-left: auto; }
+  .backend-empty button {
+    font: inherit; padding: 3px 10px; border-radius: 4px; cursor: pointer;
+    background: #fff; border: 1px solid #c89030; color: #6b4500;
+  }
+  @media (prefers-color-scheme: dark) {
+    .backend-empty button { background: #2a2208; border-color: #806020; color: #f0c060; }
+  }
+  .backend-empty button:hover { filter: brightness(1.05); }
+  .backend-empty.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -56,6 +75,14 @@
   <button id="reload">reload</button>
   <span class="status" id="status">unconfigured</span>
 </header>
+
+<div class="backend-empty hidden" id="backend-empty-banner">
+  <span><strong>No backend configured.</strong> Surface actions like "Open chunk" have nowhere to route — they will return an error. Configure one of:</span>
+  <div class="opts">
+    <button id="banner-mock">Try mock (stub responses)</button>
+    <button id="banner-focus">Enter sidecar URL…</button>
+  </div>
+</div>
 
 <iframe id="frame" sandbox="allow-scripts allow-same-origin" src="./index.html?demo=1"></iframe>
 
@@ -135,8 +162,14 @@ function getBackend() {
 
 function updateStatus() {
   const { label } = getBackend();
-  if (label === 'none' || label.startsWith('invalid')) setStatus(false, `backend: ${label}`);
-  else setStatus(true, `backend: ${label}`);
+  const banner = document.getElementById('backend-empty-banner');
+  if (label === 'none' || label.startsWith('invalid')) {
+    setStatus(false, `backend: ${label}`);
+    banner.classList.remove('hidden');
+  } else {
+    setStatus(true, `backend: ${label}`);
+    banner.classList.add('hidden');
+  }
 }
 
 async function handleRequest(m) {
@@ -206,6 +239,18 @@ document.getElementById('reload').addEventListener('click', () => {
 backendInput.addEventListener('change', () => {
   saveCfg();
   updateStatus();
+});
+
+document.getElementById('banner-mock').addEventListener('click', () => {
+  backendInput.value = 'mock';
+  saveCfg();
+  updateStatus();
+  logLine('req', 'backend set to mock (stub responses only — not real data)');
+});
+
+document.getElementById('banner-focus').addEventListener('click', () => {
+  backendInput.focus();
+  backendInput.select();
 });
 
 updateStatus();
