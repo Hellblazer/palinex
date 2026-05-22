@@ -4,6 +4,23 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.0.2] — 2026-05-22
+
+Full a2ui v0.9 Basic Catalog coverage.
+
+### Added
+- `Surface.video(url)` — Video component builder
+- `Surface.audio_player(url, description=...)` — AudioPlayer builder
+- `Surface.date_time_input(value, label, enable_date, enable_time, min, max)` — DateTimeInput builder
+- Renderer support for `Tabs`, `DateTimeInput`, `Video`, `AudioPlayer` — fills the 4-component gap from 0.0.1
+- CSS styling for tabs (tab list, active tab indicator) and audio (description + native controls)
+- Markdown sidecar walks `Tabs` (each tab title as `#### `, then child), `Video` and `AudioPlayer` (markdown link with optional description), and `DateTimeInput` (label fallback shared with other input components)
+- 9 additional tests bringing total to 28 (component shape, dynamic title binding, markdown round-trip for new components, validation of dangling tab child refs)
+
+### Coverage
+All 18 a2ui v0.9 Basic Catalog components now implemented:
+Text · Image · Icon · Video · AudioPlayer · Row · Column · List · Card · Tabs · Modal · Divider · Button · TextField · CheckBox · ChoicePicker · Slider · DateTimeInput
+
 ## [0.0.1] — 2026-05-22
 
 Initial release.

@@ -135,3 +135,102 @@ def test_text_variants_round_trip(variant):
         assert "variant" not in components["root"]
     else:
         assert components["root"]["variant"] == variant
+
+
+def test_tabs_shape():
+    s = Surface(surface_id="t-tabs", catalog_id="a2ui.basic.v0_9")
+    a = s.text("first")
+    b = s.text("second")
+    s.set_root(s.tabs([{"title": "One", "child": a}, {"title": "Two", "child": b}]))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    root = components["root"]
+    assert root["component"] == "Tabs"
+    assert len(root["tabs"]) == 2
+    assert root["tabs"][0] == {"title": "One", "child": a}
+    assert root["tabs"][1]["child"] == b
+
+
+def test_tabs_dynamic_title_serializes_as_path():
+    s = Surface(surface_id="t-tabs-dyn", catalog_id="a2ui.basic.v0_9")
+    a = s.text("content")
+    s.set_root(s.tabs([{"title": DataPath("/active_tab_title"), "child": a}]))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    assert components["root"]["tabs"][0]["title"] == {"path": "/active_tab_title"}
+
+
+def test_video_minimal():
+    s = Surface(surface_id="t-video", catalog_id="a2ui.basic.v0_9")
+    s.set_root(s.video("https://example.com/v.mp4"))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    assert components["root"] == {"id": "root", "component": "Video", "url": "https://example.com/v.mp4"}
+
+
+def test_audio_player_with_description():
+    s = Surface(surface_id="t-audio", catalog_id="a2ui.basic.v0_9")
+    s.set_root(s.audio_player("https://example.com/a.mp3", description="Episode 42"))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    assert components["root"]["component"] == "AudioPlayer"
+    assert components["root"]["url"] == "https://example.com/a.mp3"
+    assert components["root"]["description"] == "Episode 42"
+
+
+def test_audio_player_no_description_omits_field():
+    s = Surface(surface_id="t-audio-bare", catalog_id="a2ui.basic.v0_9")
+    s.set_root(s.audio_player("https://example.com/a.mp3"))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    assert "description" not in components["root"]
+
+
+def test_date_time_input_combined():
+    s = Surface(surface_id="t-dti", catalog_id="a2ui.basic.v0_9")
+    s.set_root(s.date_time_input(value="2026-05-22T12:00",
+                                  label="When",
+                                  enable_date=True,
+                                  enable_time=True,
+                                  min="2026-01-01",
+                                  max="2026-12-31"))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    root = components["root"]
+    assert root["component"] == "DateTimeInput"
+    assert root["enableDate"] is True
+    assert root["enableTime"] is True
+    assert root["min"] == "2026-01-01"
+    assert root["max"] == "2026-12-31"
+    assert root["label"] == "When"
+
+
+def test_date_time_input_date_only_omits_time():
+    s = Surface(surface_id="t-dti-date", catalog_id="a2ui.basic.v0_9")
+    s.set_root(s.date_time_input(enable_date=True))
+    components = {c["id"]: c for c in s.emit_flat()["components"]}
+    assert components["root"]["enableDate"] is True
+    assert "enableTime" not in components["root"]
+
+
+def test_markdown_walks_new_components():
+    s = Surface(surface_id="t-md", catalog_id="a2ui.basic.v0_9")
+    tab_a = s.text("tab one body")
+    tab_b = s.text("tab two body")
+    tabs = s.tabs([{"title": "Alpha", "child": tab_a}, {"title": "Beta", "child": tab_b}])
+    vid = s.video("https://example.com/v.mp4")
+    aud = s.audio_player("https://example.com/a.mp3", description="Pod")
+    dti = s.date_time_input(label="At", enable_date=True)
+    s.set_root(s.column([tabs, vid, aud, dti]))
+    md = s.to_markdown()
+    assert "#### Alpha" in md
+    assert "tab one body" in md
+    assert "#### Beta" in md
+    assert "tab two body" in md
+    assert "[Video](https://example.com/v.mp4)" in md
+    assert "[Audio: Pod](https://example.com/a.mp3)" in md
+    assert "[DateTimeInput: At]" in md
+
+
+def test_validate_catches_tabs_dangling_child():
+    s = Surface(surface_id="t-tabs-bad", catalog_id="a2ui.basic.v0_9")
+    a = s.text("a")
+    s.tabs([{"title": "x", "child": a}], id="bad-tabs")
+    s.set_root("bad-tabs")
+    s._components["root"]["tabs"].append({"title": "y", "child": "missing-id"})
+    with pytest.raises(ValueError, match="unknown tab child"):
+        s.validate()

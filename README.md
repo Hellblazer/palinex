@@ -60,7 +60,7 @@ The hosted renderer at <https://hellblazer.github.io/palinex/> accepts payloads 
 
 ## Component coverage
 
-14 of 18 a2ui Basic Catalog components: Text, Image, Icon, Row, Column, List, Card, Modal, Divider, Button, TextField, CheckBox, ChoicePicker, Slider. The remaining four (Tabs, DateTimeInput, Video, AudioPlayer) follow the same dispatch pattern and are straightforward to add.
+All 18 a2ui v0.9 Basic Catalog components: Text · Image · Icon · Video · AudioPlayer · Row · Column · List · Card · Tabs · Modal · Divider · Button · TextField · CheckBox · ChoicePicker · Slider · DateTimeInput.
 
 ## License
 

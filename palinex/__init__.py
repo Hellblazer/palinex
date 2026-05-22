@@ -324,6 +324,40 @@ class Surface:
             c["label"] = _serialize_dynamic(label)
         return self._add(c, id)
 
+    def date_time_input(self, value: str | DataPath = "", *,
+                        label: str | DataPath = "",
+                        enable_date: bool = False,
+                        enable_time: bool = False,
+                        min: str | DataPath | None = None,
+                        max: str | DataPath | None = None,
+                        id: str | None = None) -> str:
+        c: dict[str, Any] = {
+            "component": "DateTimeInput",
+            "value": _serialize_dynamic(value),
+        }
+        if enable_date:
+            c["enableDate"] = True
+        if enable_time:
+            c["enableTime"] = True
+        if min is not None:
+            c["min"] = _serialize_dynamic(min)
+        if max is not None:
+            c["max"] = _serialize_dynamic(max)
+        if label:
+            c["label"] = _serialize_dynamic(label)
+        return self._add(c, id)
+
+    def video(self, url: str | DataPath, *, id: str | None = None) -> str:
+        return self._add({"component": "Video", "url": _serialize_dynamic(url)}, id)
+
+    def audio_player(self, url: str | DataPath, *,
+                     description: str | DataPath = "",
+                     id: str | None = None) -> str:
+        c: dict[str, Any] = {"component": "AudioPlayer", "url": _serialize_dynamic(url)}
+        if description:
+            c["description"] = _serialize_dynamic(description)
+        return self._add(c, id)
+
     # ---- Action helpers -----------------------------------------------------
 
     def function_call(self, call: str, *, return_type: str = "void", **args: Any) -> FunctionCall:
@@ -473,6 +507,18 @@ class Surface:
         elif kind in ("TextField", "CheckBox", "ChoicePicker", "Slider", "DateTimeInput"):
             label = self._resolve_dyn(c.get("label", c["id"]), item)
             lines.append(ind + f"[{kind}: {label}]")
+        elif kind == "Tabs":
+            for t in c.get("tabs", []):
+                title = self._resolve_dyn(t.get("title", ""), item)
+                lines.append(ind + f"#### {title}")
+                self._walk_md(t["child"], depth=depth, lines=lines, item=item)
+        elif kind == "Video":
+            url = self._resolve_dyn(c.get("url"), item)
+            lines.append(ind + f"[Video]({url})")
+        elif kind == "AudioPlayer":
+            url = self._resolve_dyn(c.get("url"), item)
+            desc = self._resolve_dyn(c.get("description", ""), item)
+            lines.append(ind + (f"[Audio: {desc}]({url})" if desc else f"[Audio]({url})"))
         else:
             lines.append(ind + f"[{kind}]")
 

@@ -61,6 +61,16 @@
   .a2ui-chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .a2ui-chip { background: var(--card); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
   .a2ui-chip.selected { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  .a2ui-tabs { display: flex; flex-direction: column; gap: 0; }
+  .a2ui-tablist { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .a2ui-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 8px 14px; color: var(--muted); cursor: pointer; font: inherit; margin-bottom: -1px; }
+  .a2ui-tab:hover { color: var(--fg); }
+  .a2ui-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .a2ui-tabpanel { padding: 14px 0; }
+  .a2ui-video { max-width: 100%; border-radius: 4px; }
+  .a2ui-audio { display: flex; flex-direction: column; gap: 4px; }
+  .a2ui-audio audio { width: 100%; }
+  .a2ui-audio-desc { font-size: 13px; color: var(--muted); }
   .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 100; }
   .modal { background: var(--card); border-radius: 8px; padding: 20px; max-width: 480px; width: 90%; max-height: 80vh; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
@@ -308,6 +318,59 @@ const renderers = {
                .value=${String(value)}
                @input=${(e) => onInputChange(c, Number(e.target.value))}>
       </label>`;
+  },
+
+  Tabs: (c) => {
+    const tabs = c.tabs || [];
+    if (tabs.length === 0) return html`<div class="error">Tabs ${c.id}: no tabs defined</div>`;
+    const active = state.inputValues[c.id] ?? 0;
+    return html`
+      <div class="a2ui-tabs" data-id=${c.id}>
+        <div class="a2ui-tablist" role="tablist">
+          ${tabs.map((t, i) => html`
+            <button class="a2ui-tab ${active === i ? 'active' : ''}"
+                    role="tab" aria-selected=${active === i ? 'true' : 'false'}
+                    @click=${() => { state.inputValues[c.id] = i; rerender(); }}>
+              ${resolveDynamic(t.title, `Tab ${i+1}`)}
+            </button>`)}
+        </div>
+        <div class="a2ui-tabpanel" role="tabpanel">
+          ${renderById(tabs[active]?.child)}
+        </div>
+      </div>`;
+  },
+
+  DateTimeInput: (c) => {
+    const label = resolveDynamic(c.label, '');
+    const value = state.inputValues[c.id] ?? resolveDynamic(c.value, '');
+    const inputType = c.enableDate && c.enableTime ? 'datetime-local'
+                    : c.enableTime ? 'time'
+                    : c.enableDate ? 'date'
+                    : 'datetime-local';
+    return html`
+      <label class="a2ui-lbl" data-id=${c.id}>
+        ${label ? html`<span>${label}</span>` : nothing}
+        <input class="a2ui-input" type=${inputType}
+               min=${resolveDynamic(c.min, '') || nothing}
+               max=${resolveDynamic(c.max, '') || nothing}
+               .value=${String(value)}
+               @input=${(e) => onInputChange(c, e.target.value)}>
+      </label>`;
+  },
+
+  Video: (c) => {
+    const url = resolveDynamic(c.url, '');
+    return html`<video class="a2ui-video" data-id=${c.id} controls src=${url}></video>`;
+  },
+
+  AudioPlayer: (c) => {
+    const url = resolveDynamic(c.url, '');
+    const desc = resolveDynamic(c.description, '');
+    return html`
+      <div class="a2ui-audio" data-id=${c.id}>
+        ${desc ? html`<div class="a2ui-audio-desc">${desc}</div>` : nothing}
+        <audio controls src=${url}></audio>
+      </div>`;
   },
 };
 
