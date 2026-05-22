@@ -4,6 +4,19 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.0.5] — 2026-05-22
+
+MCP UI resource helper for embedding palinex surfaces inside Claude Code (or any host that consumes MCP UI Apps).
+
+### Added
+- `palinex.wrap_as_mcp_ui_resource(payload, *, chash_resolver=None, renderer_url=..., title=...)` — wraps an a2ui v0.9 surface payload as a self-contained HTML page suitable for the `text` field of an MCP UI resource. Hosts the canonical renderer in an iframe, posts the payload on load, no live host bridge required for static snapshots.
+- When `chash_resolver` is provided, pre-resolves: any string value in the data model that the resolver returns text for is replaced; any `Button` with `openChash` action is rewritten to `copyToClipboard` carrying the same path reference. Click → resolved text copied to clipboard. No round-trip to the host needed.
+- 7 new tests covering shape envelope + flat shape, resolver substitution, action rewrite, non-`openChash` actions left alone, payload immutability (deep-copied internally), HTML escaping of renderer URL, and `</script>` injection protection.
+- Exported as `palinex.wrap_as_mcp_ui_resource` (top-level).
+
+### Notes
+- This is the simple-path Claude Code integration (palinex RDR-001 §Item 4 "MCP UI resource" delivery). Static snapshots only; interactive flows (live data fetch on click) require the bidirectional `a2ui.request` / `a2ui.response` protocol which palinex's `host-bridge.html` reference still demonstrates.
+
 ## [0.0.4] — 2026-05-22
 
 Action-context bug fix + clearer empty-backend UX. No new features.

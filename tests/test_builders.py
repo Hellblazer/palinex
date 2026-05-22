@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from palinex import DataPath, Event, FunctionCall, Surface, demo_nx_answer
+from palinex import DataPath, Event, FunctionCall, Surface, demo_nx_answer, wrap_as_mcp_ui_resource
 
 
 def test_minimal_surface_round_trips():
@@ -234,3 +234,116 @@ def test_validate_catches_tabs_dangling_child():
     s._components["root"]["tabs"].append({"title": "y", "child": "missing-id"})
     with pytest.raises(ValueError, match="unknown tab child"):
         s.validate()
+
+
+# ---- wrap_as_mcp_ui_resource ------------------------------------------------
+
+def _simple_envelope():
+    return {
+        "version": "v0.9",
+        "messages": [
+            {"version": "v0.9", "createSurface": {"surfaceId": "t", "catalogId": "a2ui.basic.v0_9"}},
+            {"version": "v0.9", "updateDataModel": {"surfaceId": "t", "path": "/", "value": {
+                "items": [
+                    {"title": "alpha", "chash": "abc123"},
+                    {"title": "beta", "chash": "def456"},
+                ],
+                "other": "literal string, not a chash",
+            }}},
+            {"version": "v0.9", "updateComponents": {"surfaceId": "t", "components": [
+                {"id": "root", "component": "Column", "children": ["btn"]},
+                {"id": "btn-label", "component": "Text", "text": "Open"},
+                {"id": "btn", "component": "Button", "child": "btn-label",
+                 "action": {"functionCall": {"call": "openChash", "args": {"chash": {"path": "/items/0/chash"}}}}},
+            ]}},
+        ],
+    }
+
+
+def test_wrap_without_resolver_embeds_payload_verbatim():
+    payload = _simple_envelope()
+    html = wrap_as_mcp_ui_resource(payload)
+    assert '<title>palinex surface</title>' in html
+    assert 'https://hellblazer.github.io/palinex/index.html' in html
+    # Payload appears in the inline JSON script tag
+    assert '"surfaceId": "t"' in html.replace("\n", "")  # tolerant of whitespace
+    # chash NOT substituted (no resolver)
+    assert '"abc123"' in html
+    # action still openChash
+    assert '"call": "openChash"' in html
+
+
+def test_wrap_with_resolver_substitutes_chashes_and_rewrites_actions():
+    payload = _simple_envelope()
+    db = {"abc123": "the alpha chunk text", "def456": "the beta chunk text"}
+
+    def resolver(s):
+        return db.get(s)
+
+    html = wrap_as_mcp_ui_resource(payload, chash_resolver=resolver)
+    # Chash strings replaced with resolved text
+    assert "the alpha chunk text" in html
+    assert "the beta chunk text" in html
+    # Original chash IDs gone from data model
+    assert '"abc123"' not in html
+    assert '"def456"' not in html
+    # openChash rewritten to copyToClipboard, same path arg
+    assert '"copyToClipboard"' in html
+    assert '"openChash"' not in html
+    # Non-chash string passed through
+    assert "literal string, not a chash" in html
+
+
+def test_wrap_preserves_input_payload():
+    payload = _simple_envelope()
+    original = json.loads(json.dumps(payload))  # deep copy via roundtrip
+    wrap_as_mcp_ui_resource(payload, chash_resolver=lambda s: "X" if s == "abc123" else None)
+    # Caller's payload object is not mutated.
+    assert payload == original
+
+
+def test_wrap_renderer_url_is_html_escaped():
+    payload = _simple_envelope()
+    html = wrap_as_mcp_ui_resource(payload, renderer_url="https://example.com/x?a=1&b=2")
+    # Ampersand in src attribute must be HTML-escaped to be valid.
+    assert "&amp;b=2" in html
+
+
+def test_wrap_payload_json_avoids_script_close_tag_injection():
+    # Payload containing literal "</script>" must not break out of the script tag.
+    payload = {"components": [{"id": "root", "component": "Text", "text": "</script><x>"}]}
+    html = wrap_as_mcp_ui_resource(payload)
+    # The literal "</" sequence inside the JSON should be escaped.
+    assert "</script><x>" not in html
+    assert "<\\/script>" in html or "<\\/" in html
+
+
+def test_wrap_flat_shape_supported():
+    payload = {
+        "surfaceId": "flat", "catalogId": "a2ui.basic.v0_9",
+        "components": [
+            {"id": "root", "component": "Text", "text": "flat shape"},
+        ],
+        "dataModel": {"k": "chashable"},
+    }
+    html = wrap_as_mcp_ui_resource(payload, chash_resolver=lambda s: "RESOLVED" if s == "chashable" else None)
+    assert "RESOLVED" in html
+    assert '"chashable"' not in html
+
+
+def test_wrap_button_without_open_chash_unchanged():
+    payload = {
+        "version": "v0.9",
+        "messages": [
+            {"version": "v0.9", "createSurface": {"surfaceId": "t", "catalogId": "a2ui.basic.v0_9"}},
+            {"version": "v0.9", "updateComponents": {"surfaceId": "t", "components": [
+                {"id": "root", "component": "Button", "child": "lbl",
+                 "action": {"functionCall": {"call": "openUrl", "args": {"url": "https://example.com"}}}},
+                {"id": "lbl", "component": "Text", "text": "go"},
+            ]}},
+        ],
+    }
+    html = wrap_as_mcp_ui_resource(payload, chash_resolver=lambda s: None)
+    # openUrl actions are NOT rewritten — only openChash is.
+    assert '"openUrl"' in html
+    assert '"copyToClipboard"' not in html

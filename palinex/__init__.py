@@ -52,6 +52,7 @@ __all__ = [
     "FunctionCall",
     "Event",
     "load_schemas",
+    "wrap_as_mcp_ui_resource",
     "BASIC_COMPONENTS",
 ]
 
@@ -629,6 +630,189 @@ def load_schemas(json_dir: str | Path) -> dict[str, Any]:
         with f.open() as fp:
             out[f.name] = json.load(fp)
     return out
+
+
+# ---- MCP UI resource wrapper -----------------------------------------------
+
+import html as _html_mod
+from typing import Callable
+
+
+def wrap_as_mcp_ui_resource(
+    payload: dict[str, Any],
+    *,
+    chash_resolver: Callable[[str], str | None] | None = None,
+    renderer_url: str = "https://hellblazer.github.io/palinex/index.html",
+    title: str = "palinex surface",
+) -> str:
+    """Wrap an a2ui v0.9 surface payload as a self-contained HTML document
+    suitable for use as the ``text`` field of an MCP UI resource.
+
+    The returned HTML is a tiny wrapper that hosts the canonical palinex
+    renderer in an iframe and posts the payload to it once loaded. No
+    live host-bridge is required — interactive actions that would
+    otherwise need round-tripping to the host are pre-resolved at
+    wrap time.
+
+    When ``chash_resolver`` is provided, the wrapper rewrites the payload:
+
+    - Any string value in the data model that ``chash_resolver`` returns
+      a non-None result for is replaced with the resolved text.
+    - Any ``Button`` component whose action is ``openChash`` is rewritten
+      to ``copyToClipboard`` carrying the same path reference (so the
+      already-resolved text in the data model gets copied to clipboard
+      on click — no host bridge needed).
+
+    Non-chash strings are passed through; non-Button components are
+    untouched. If ``chash_resolver`` is omitted, the payload is embedded
+    verbatim.
+
+    Args:
+        payload: a2ui v0.9 envelope (``{version, messages: [...]}``) or
+            the flat shape (``{components: [...], dataModel: {...}}``).
+        chash_resolver: Optional callable mapping a candidate chash string
+            to its resolved text, or None if not a chash.
+        renderer_url: URL of the palinex renderer to embed. Defaults to
+            the hosted GitHub Pages renderer.
+        title: HTML ``<title>`` for the wrapper page.
+
+    Returns:
+        Self-contained HTML string. Use as the ``text`` field of an MCP
+        UI resource (``{type: "resource", resource: {uri, mimeType:
+        "text/html", text: <this>}}``).
+    """
+    resolved = _pre_resolve_payload(payload, chash_resolver) if chash_resolver else payload
+    payload_json = json.dumps(resolved, ensure_ascii=False)
+    return _MCP_UI_TEMPLATE.format(
+        title=_html_mod.escape(title),
+        renderer_url=_html_mod.escape(renderer_url, quote=True),
+        payload_json=payload_json.replace("</", "<\\/"),
+    )
+
+
+_MCP_UI_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title}</title>
+<style>
+  html, body {{ margin: 0; padding: 0; height: 100%; }}
+  iframe {{ display: block; width: 100%; height: 100vh; border: 0; }}
+</style>
+</head>
+<body>
+<iframe id="palinex-frame" src="{renderer_url}" sandbox="allow-scripts allow-same-origin"></iframe>
+<script type="application/json" id="palinex-payload">{payload_json}</script>
+<script>
+  (function() {{
+    const frame = document.getElementById('palinex-frame');
+    const payload = JSON.parse(document.getElementById('palinex-payload').textContent);
+    function deliver() {{
+      try {{ frame.contentWindow.postMessage({{type: 'a2ui.load', payload}}, '*'); }}
+      catch (e) {{ console.error('[palinex-mcp-ui]', e); }}
+    }}
+    if (frame.contentDocument && frame.contentDocument.readyState === 'complete') deliver();
+    else frame.addEventListener('load', deliver);
+  }})();
+</script>
+</body>
+</html>
+"""
+
+
+def _pre_resolve_payload(payload: dict[str, Any], resolver: Callable[[str], str | None]) -> dict[str, Any]:
+    """Deep-copy `payload` and substitute chash strings + rewrite openChash actions.
+
+    See `wrap_as_mcp_ui_resource` for semantics. Pure function; doesn't
+    mutate the input.
+    """
+    import copy as _copy
+    p = _copy.deepcopy(payload)
+    _resolve_strings_in_data_model(p, resolver)
+    _rewrite_open_chash_actions(p)
+    return p
+
+
+def _data_model_locations(payload: dict[str, Any]) -> list:
+    """Return a list of (container, key) tuples pointing at every dataModel
+    value in the payload, regardless of shape (envelope or flat)."""
+    locs: list = []
+    if isinstance(payload.get("messages"), list):
+        for m in payload["messages"]:
+            if isinstance(m, dict) and "updateDataModel" in m and "value" in m["updateDataModel"]:
+                locs.append((m["updateDataModel"], "value"))
+    if "dataModel" in payload:
+        locs.append((payload, "dataModel"))
+    if "updateDataModel" in payload and "value" in payload["updateDataModel"]:
+        locs.append((payload["updateDataModel"], "value"))
+    return locs
+
+
+def _component_lists(payload: dict[str, Any]) -> list[list]:
+    """Return every components-array in the payload (mutating-safe)."""
+    out: list[list] = []
+    if isinstance(payload.get("messages"), list):
+        for m in payload["messages"]:
+            if isinstance(m, dict) and "updateComponents" in m:
+                cs = m["updateComponents"].get("components")
+                if isinstance(cs, list):
+                    out.append(cs)
+    if isinstance(payload.get("components"), list):
+        out.append(payload["components"])
+    if "updateComponents" in payload:
+        cs = payload["updateComponents"].get("components")
+        if isinstance(cs, list):
+            out.append(cs)
+    return out
+
+
+def _resolve_strings_in_data_model(payload: dict[str, Any], resolver: Callable[[str], str | None]) -> None:
+    """For each data-model value in the payload, walk it and replace any
+    string that `resolver` returns a non-None text for."""
+    for container, key in _data_model_locations(payload):
+        container[key] = _walk_resolve(container[key], resolver)
+
+
+def _walk_resolve(node: Any, resolver: Callable[[str], str | None]) -> Any:
+    if isinstance(node, str):
+        replacement = resolver(node)
+        return replacement if replacement is not None else node
+    if isinstance(node, dict):
+        return {k: _walk_resolve(v, resolver) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_walk_resolve(v, resolver) for v in node]
+    return node
+
+
+def _rewrite_open_chash_actions(payload: dict[str, Any]) -> None:
+    """Rewrite every Button.action of shape `{functionCall: {call: openChash, ...}}`
+    to `{functionCall: {call: copyToClipboard, args: {value: <same chash arg>}}}`.
+
+    The data model has already been resolved (chash IDs → text), so the
+    `value` parameter now points at the chunk text. Clicking the button
+    copies the resolved text to clipboard — no host bridge required.
+    """
+    for components in _component_lists(payload):
+        for c in components:
+            if not isinstance(c, dict) or c.get("component") != "Button":
+                continue
+            action = c.get("action")
+            if not isinstance(action, dict):
+                continue
+            fc = action.get("functionCall")
+            if not isinstance(fc, dict) or fc.get("call") != "openChash":
+                continue
+            chash_arg = fc.get("args", {}).get("chash")
+            if chash_arg is None:
+                continue
+            c["action"] = {
+                "functionCall": {
+                    "call": "copyToClipboard",
+                    "args": {"value": chash_arg},
+                    "returnType": fc.get("returnType", "void"),
+                }
+            }
 
 
 # ---- Demo ------------------------------------------------------------------
