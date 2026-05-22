@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>palinex inspector — a2ui v0.9 surface validator</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fafafa; --fg: #1a1a1a; --muted: #666; --border: #d0d0d0;
+    --card: #fff; --accent: #0066cc; --accent-fg: #fff; --danger: #b00020;
+    --warn: #b86b00; --ok: #2e7d32;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a1a; --fg: #e8e8e8; --muted: #999; --border: #333;
+      --card: #242424; --accent: #4a9eff; --accent-fg: #0a0a0a;
+      --warn: #e0a050; --ok: #6dbf72;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 13px; margin: 0; font-weight: 600; flex-shrink: 0; }
+  header .meta { color: var(--muted); font-size: 12px; }
+  header .actions { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  header button {
+    background: var(--card); border: 1px solid var(--border); color: var(--fg);
+    padding: 4px 10px; border-radius: 4px; cursor: pointer; font: inherit;
+  }
+  header button:hover { background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
+  header button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  header button.primary:hover { filter: brightness(1.05); }
+  header button[disabled] { opacity: 0.6; cursor: not-allowed; }
+  header input[type="file"] { display: none; }
+
+  main {
+    display: grid;
+    grid-template-columns: 30% 40% 30%;
+    gap: 12px;
+    padding: 12px;
+    min-height: calc(100vh - 96px);
+  }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .panel {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px; display: flex; flex-direction: column; gap: 8px;
+    min-height: 0;
+  }
+  .panel-title {
+    font-size: 12px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.04em;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel-title .count { font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0; }
+  .panel-body { overflow: auto; max-height: 520px; }
+
+  .error {
+    border-left: 3px solid var(--danger); padding: 6px 10px;
+    background: color-mix(in srgb, var(--danger) 8%, var(--bg));
+    border-radius: 4px; font-size: 13px;
+  }
+  .error a { color: var(--danger); text-decoration: underline; }
+  .error.warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--bg)); }
+  .error.warn a { color: var(--warn); }
+
+  table.comp { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.comp th, table.comp td {
+    padding: 4px 6px; text-align: left; border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.comp th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
+  table.comp tr { cursor: pointer; }
+  table.comp tr:hover td { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  table.comp tr.selected td { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  table.comp tr.row-err td { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+  table.comp tr.row-orphan td { color: var(--warn); font-style: italic; }
+  .pill {
+    display: inline-block; padding: 1px 6px; border-radius: 999px;
+    font-size: 11px; background: var(--bg); border: 1px solid var(--border);
+  }
+  .pill.ok { color: var(--ok); border-color: var(--ok); }
+  .pill.err { color: var(--danger); border-color: var(--danger); }
+  .pill.warn { color: var(--warn); border-color: var(--warn); }
+
+  input.a2ui-input, select.a2ui-input, textarea.a2ui-input {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 6px; font: inherit;
+  }
+  textarea.a2ui-input { resize: vertical; font-family: ui-monospace, monospace; font-size: 12px; min-height: 160px; width: 100%; }
+
+  pre.code, pre.json {
+    margin: 0; padding: 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; overflow: auto; font-family: ui-monospace, monospace;
+    font-size: 12px; max-height: 520px; white-space: pre-wrap; word-break: break-word;
+  }
+  pre.code mark { background: color-mix(in srgb, var(--accent) 25%, transparent); padding: 0; }
+
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal {
+    background: var(--card); border-radius: 8px; padding: 18px;
+    width: 90%; max-width: 640px; max-height: 80vh; overflow: auto;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .modal h3 { margin: 0; font-size: 14px; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+  .empty {
+    padding: 32px; text-align: center; color: var(--muted);
+    border: 2px dashed var(--border); border-radius: 8px;
+  }
+  .empty.drag-over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, var(--card)); }
+
+  .path-list { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-family: ui-monospace, monospace; }
+  .path-list .path { display: flex; gap: 8px; align-items: baseline; padding: 2px 4px; border-radius: 3px; }
+  .path-list .path:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .path-list .path .ptr { color: var(--accent); }
+  .path-list .path .val { color: var(--muted); }
+
+  footer {
+    position: sticky; bottom: 0; padding: 6px 16px; background: var(--card);
+    border-top: 1px solid var(--border); font-size: 12px; color: var(--muted);
+    display: flex; gap: 16px; align-items: center;
+  }
+  footer .state-pill { font-weight: 500; }
+  footer .state-pill.idle { color: var(--muted); }
+  footer .state-pill.loading { color: var(--warn); }
+  footer .state-pill.ready { color: var(--ok); }
+  footer .state-pill.error { color: var(--danger); }
+  .spinner {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  details.debug summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>palinex inspector</h1>
+  <span class="meta" id="meta">no payload</span>
+  <div class="actions">
+    <button id="btn-load">Load file</button>
+    <button id="btn-paste">Paste JSON…</button>
+    <button id="btn-url">URL…</button>
+    <button id="btn-demo">Demo</button>
+    <button id="btn-deep" class="primary" title="Loads ~10 MB Python runtime in your browser">Validate (deep) ↓ ~10 MB</button>
+  </div>
+  <input type="file" id="file-in" accept=".json">
+</header>
+
+<main id="main">
+  <div class="col">
+    <div class="panel">
+      <div class="panel-title">Errors <span class="count" id="error-count"></span></div>
+      <div class="panel-body" id="errors-panel">
+        <div class="empty">No payload loaded yet.</div>
+      </div>
+    </div>
+    <div class="panel" style="flex: 1;">
+      <div class="panel-title">
+        Components <span class="count" id="comp-count"></span>
+        <select class="a2ui-input" id="filter" style="font-size: 11px; padding: 2px 4px;">
+          <option value="all">all</option>
+          <option value="err">errors only</option>
+          <option value="orphan">orphans only</option>
+        </select>
+      </div>
+      <div class="panel-body">
+        <table class="comp" id="comp-table"><thead><tr>
+          <th>id</th><th>type</th><th>role</th><th>status</th>
+        </tr></thead><tbody id="comp-tbody"></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel" style="flex: 1;">
+      <div class="panel-title">Payload <span class="count" id="payload-meta"></span></div>
+      <div class="panel-body">
+        <pre class="code" id="payload-view"><span style="color: var(--muted);">load a payload to begin</span></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel">
+      <div class="panel-title">Markdown sidecar <span class="count" id="md-state">deep-only</span></div>
+      <div class="panel-body">
+        <pre class="code" id="markdown-view"><span style="color: var(--muted);">click "Validate (deep)" to render</span></pre>
+      </div>
+    </div>
+    <div class="panel" style="flex: 1;">
+      <div class="panel-title">Data-path references <span class="count" id="path-count"></span></div>
+      <div class="panel-body" id="paths-panel">
+        <div class="empty" style="border: none; padding: 4px;"><span style="color: var(--muted);">no paths yet</span></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Pyodide: <span class="state-pill idle" id="state-pill">idle</span></span>
+  <span id="state-detail"></span>
+  <span style="margin-left: auto;" id="hint">Drop a JSON file anywhere · Paste with the Paste button · or click Demo</span>
+</footer>
+
+<script type="module">
+import { html, render, nothing } from 'https://cdn.jsdelivr.net/npm/lit-html@3.2.1/+esm';
+
+const PYODIDE_VERSION = 'v0.27.2';
+const PYODIDE_CDN = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/`;
+const PALINEX_VERSION = '0.0.2';
+const SCHEMA_BASE = 'https://raw.githubusercontent.com/google/a2ui/main/specification/v0_9/json';
+const SCHEMA_FILES = ['server_to_client.json', 'common_types.json', 'basic_catalog.json'];
+
+const BASIC_COMPONENTS = new Set([
+  'Text', 'Image', 'Icon', 'Video', 'AudioPlayer',
+  'Row', 'Column', 'List', 'Card', 'Tabs', 'Modal', 'Divider',
+  'Button', 'TextField', 'CheckBox', 'ChoicePicker', 'Slider', 'DateTimeInput',
+]);
+
+const state = {
+  payload: null,
+  components: [],
+  dataModel: {},
+  surfaceId: '',
+  catalogId: '',
+  structural: [],
+  deep: [],
+  markdown: '',
+  roles: {},
+  paths: [],
+  selectedId: null,
+  filter: 'all',
+  pyodideState: 'idle',
+  pyodideDetail: '',
+};
+
+const log = (...a) => console.log('[inspector]', ...a);
+
+// ---- ingest + payload normalization ----
+
+function normalize(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  let surfaceId = '', catalogId = 'a2ui.basic.v0_9';
+  let components = [], dataModel = {};
+
+  const applyMessage = (m) => {
+    if (m.createSurface) {
+      surfaceId = m.createSurface.surfaceId || surfaceId;
+      catalogId = m.createSurface.catalogId || catalogId;
+    } else if (m.updateComponents) {
+      components = m.updateComponents.components || [];
+      if (m.updateComponents.surfaceId) surfaceId = m.updateComponents.surfaceId;
+    } else if (m.updateDataModel) {
+      const v = m.updateDataModel.value;
+      if (v !== undefined) dataModel = v;
+    }
+  };
+
+  if (Array.isArray(payload.messages)) {
+    for (const m of payload.messages) applyMessage(m);
+  } else if (payload.version === 'v0.9' && (payload.createSurface || payload.updateComponents || payload.updateDataModel)) {
+    applyMessage(payload);
+  } else if (Array.isArray(payload.components)) {
+    components = payload.components;
+    surfaceId = payload.surfaceId || surfaceId;
+    catalogId = payload.catalogId || catalogId;
+    dataModel = payload.dataModel || {};
+  } else {
+    return null;
+  }
+  return { surfaceId, catalogId, components, dataModel };
+}
+
+function ingest(payload, source) {
+  const norm = normalize(payload);
+  if (!norm) {
+    state.structural = [{cid: '-', kind: 'Envelope', message: 'unrecognized payload shape — need {version, messages} or {components: [...]}'}];
+    state.payload = payload;
+    state.components = [];
+    state.dataModel = {};
+    state.deep = [];
+    state.markdown = '';
+    state.roles = {};
+    state.paths = [];
+    state.selectedId = null;
+    rerender();
+    return;
+  }
+  state.payload = payload;
+  state.components = norm.components;
+  state.dataModel = norm.dataModel;
+  state.surfaceId = norm.surfaceId;
+  state.catalogId = norm.catalogId;
+  state.deep = [];
+  state.markdown = '';
+  state.selectedId = null;
+  state.structural = validateStructural(norm.components);
+  state.roles = computeRoles(norm.components);
+  state.paths = walkPaths(payload, norm.dataModel);
+  log('ingested', source, norm.surfaceId, norm.components.length, 'components');
+  rerender();
+}
+
+// ---- structural validator (mirrors palinex._validate_refs) ----
+
+function validateStructural(components) {
+  const errors = [];
+  const idx = new Map();
+  for (const c of components) {
+    if (!c || typeof c !== 'object') {
+      errors.push({cid: '-', kind: '-', message: 'component entry is not an object'});
+      continue;
+    }
+    if (!c.id) { errors.push({cid: '-', kind: c.component || '-', message: 'component missing id'}); continue; }
+    if (idx.has(c.id)) { errors.push({cid: c.id, kind: c.component || '-', message: `duplicate id ${c.id}`}); continue; }
+    idx.set(c.id, c);
+  }
+
+  for (const c of components) {
+    if (!c || !c.id) continue;
+    const kind = c.component;
+    if (!BASIC_COMPONENTS.has(kind)) {
+      errors.push({cid: c.id, kind, message: `unknown component '${kind}' in id '${c.id}'`});
+      continue;
+    }
+    if (kind === 'Card' || kind === 'Button') {
+      const child = c.child;
+      if (child !== undefined && !idx.has(child)) {
+        errors.push({cid: c.id, kind, message: `${kind} '${c.id}': unknown child id '${child}'`});
+      }
+      if (kind === 'Button' && !c.action) {
+        errors.push({cid: c.id, kind, message: `Button '${c.id}': action is required`});
+      }
+    } else if (kind === 'Modal') {
+      for (const slot of ['trigger', 'content']) {
+        const ref = c[slot];
+        if (ref !== undefined && !idx.has(ref)) {
+          errors.push({cid: c.id, kind, message: `Modal '${c.id}': unknown ${slot} id '${ref}'`});
+        }
+      }
+    } else if (kind === 'Row' || kind === 'Column' || kind === 'List') {
+      const children = c.children;
+      if (Array.isArray(children)) {
+        for (const ref of children) {
+          if (!idx.has(ref)) errors.push({cid: c.id, kind, message: `${kind} '${c.id}': unknown child id '${ref}'`});
+        }
+      } else if (children && typeof children === 'object') {
+        const t = children.componentId;
+        if (t && !idx.has(t)) errors.push({cid: c.id, kind, message: `${kind} '${c.id}': unknown template componentId '${t}'`});
+      }
+    } else if (kind === 'Tabs') {
+      for (const t of (c.tabs || [])) {
+        if (t.child && !idx.has(t.child)) {
+          errors.push({cid: c.id, kind, message: `Tabs '${c.id}': unknown tab child id '${t.child}'`});
+        }
+      }
+    }
+  }
+
+  if (components.length > 0 && !idx.has('root')) {
+    errors.push({cid: '-', kind: '-', message: `no component with id='root' found`});
+  }
+  return errors;
+}
+
+// ---- role computation ----
+
+function computeRoles(components) {
+  const roles = {};
+  const refs = new Map();  // child id -> parent info
+  for (const c of components) {
+    if (!c.id) continue;
+    if (c.component === 'Card' || c.component === 'Button') {
+      if (c.child) refs.set(c.child, { parent: c.id, slot: 'child' });
+    } else if (c.component === 'Modal') {
+      if (c.trigger) refs.set(c.trigger, { parent: c.id, slot: 'trigger' });
+      if (c.content) refs.set(c.content, { parent: c.id, slot: 'content' });
+    } else if (c.component === 'Row' || c.component === 'Column' || c.component === 'List') {
+      if (Array.isArray(c.children)) {
+        for (const ref of c.children) refs.set(ref, { parent: c.id, slot: 'child' });
+      } else if (c.children && c.children.componentId) {
+        refs.set(c.children.componentId, { parent: c.id, slot: 'template' });
+      }
+    } else if (c.component === 'Tabs') {
+      for (const t of (c.tabs || [])) {
+        if (t.child) refs.set(t.child, { parent: c.id, slot: 'tab' });
+      }
+    }
+  }
+  for (const c of components) {
+    if (!c.id) continue;
+    if (c.id === 'root') {
+      roles[c.id] = { label: 'root', kind: 'root' };
+    } else if (refs.has(c.id)) {
+      const r = refs.get(c.id);
+      roles[c.id] = { label: `${r.slot} of ${r.parent}`, kind: r.slot };
+    } else {
+      roles[c.id] = { label: 'orphan', kind: 'orphan' };
+    }
+  }
+  return roles;
+}
+
+// ---- data-path walker ----
+
+function walkPaths(payload, dataModel) {
+  const found = [];
+  const seen = new WeakSet();
+  function scan(obj) {
+    if (!obj || typeof obj !== 'object' || seen.has(obj)) return;
+    seen.add(obj);
+    if (typeof obj.path === 'string' && obj.path.startsWith('/') && Object.keys(obj).length === 1) {
+      const resolved = jsonPointerGet(dataModel, obj.path);
+      found.push({ path: obj.path, resolved: resolved !== undefined, value: resolved });
+      return;
+    }
+    if (Array.isArray(obj)) {
+      for (const v of obj) scan(v);
+    } else {
+      for (const k of Object.keys(obj)) scan(obj[k]);
+    }
+  }
+  scan(payload);
+  return found;
+}
+
+function jsonPointerGet(obj, ptr) {
+  if (!ptr || ptr === '/') return obj;
+  const parts = ptr.replace(/^\//, '').split('/').map(p => p.replace(/~1/g, '/').replace(/~0/g, '~'));
+  let cur = obj;
+  for (const p of parts) {
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) {
+      const i = Number(p);
+      if (Number.isNaN(i)) return undefined;
+      cur = cur[i];
+    } else if (typeof cur === 'object') {
+      // @item alias is synthetic for templates; treat as opaque (don't resolve)
+      cur = cur[p];
+    } else {
+      return undefined;
+    }
+  }
+  return cur;
+}
+
+// ---- Pyodide bootstrap state machine ----
+
+let pyodideInstance = null;
+let schemaCache = null;
+
+function setPyState(s, detail = '') {
+  state.pyodideState = s;
+  state.pyodideDetail = detail;
+  rerender();
+}
+
+async function fetchSchemas() {
+  if (schemaCache) return schemaCache;
+  const cached = sessionStorage.getItem('palinex.inspector.schemas.v1');
+  if (cached) { schemaCache = JSON.parse(cached); return schemaCache; }
+  const result = {};
+  for (const f of SCHEMA_FILES) {
+    const r = await fetch(`${SCHEMA_BASE}/${f}`);
+    if (!r.ok) throw new Error(`schema fetch failed: ${f} (HTTP ${r.status})`);
+    result[f] = await r.json();
+  }
+  schemaCache = result;
+  try { sessionStorage.setItem('palinex.inspector.schemas.v1', JSON.stringify(result)); }
+  catch (e) { log('sessionStorage write failed (quota?)', e.message); }
+  return result;
+}
+
+async function bootstrapPyodide() {
+  if (pyodideInstance) return pyodideInstance;
+  setPyState('loading-pyodide', 'Loading Python runtime…');
+  if (!window.loadPyodide) {
+    const script = document.createElement('script');
+    script.src = `${PYODIDE_CDN}pyodide.js`;
+    await new Promise((resolve, reject) => { script.onload = resolve; script.onerror = () => reject(new Error('pyodide.js load failed')); document.head.appendChild(script); });
+  }
+  pyodideInstance = await window.loadPyodide({ indexURL: PYODIDE_CDN });
+  setPyState('loading-palinex', `Installing palinex==${PALINEX_VERSION} via micropip…`);
+  await pyodideInstance.loadPackage('micropip');
+  await pyodideInstance.runPythonAsync(`
+import micropip
+await micropip.install(['palinex==${PALINEX_VERSION}', 'jsonschema>=4', 'referencing>=0.30'])
+import palinex
+`);
+  setPyState('ready', 'palinex loaded; schemas pending');
+  return pyodideInstance;
+}
+
+async function runDeepValidate() {
+  if (!state.payload) return;
+  try {
+    await bootstrapPyodide();
+    let schemas;
+    try {
+      schemas = await fetchSchemas();
+    } catch (e) {
+      setPyState('ready', `schema fetch failed: ${e.message} — structural results stand`);
+      return;
+    }
+    setPyState('ready', 'running deep validation…');
+    pyodideInstance.globals.set('PAYLOAD_JSON', JSON.stringify(state.payload));
+    pyodideInstance.globals.set('SCHEMAS_JSON', JSON.stringify(schemas));
+    const resJson = await pyodideInstance.runPythonAsync(PY_BRIDGE);
+    const result = JSON.parse(resJson);
+    state.deep = result.errors || [];
+    state.markdown = result.markdown || '';
+    setPyState('ready', `deep validation complete — ${state.deep.length} issue(s)`);
+  } catch (e) {
+    setPyState('error', e.message || String(e));
+  }
+}
+
+const PY_BRIDGE = `
+import json
+import palinex
+
+payload = json.loads(PAYLOAD_JSON)
+schemas = json.loads(SCHEMAS_JSON)
+
+# Normalize same way as JS side
+surface_id = ''
+catalog_id = 'a2ui.basic.v0_9'
+components = []
+data_model = {}
+
+def apply_message(m):
+    global surface_id, catalog_id, components, data_model
+    if 'createSurface' in m:
+        surface_id = m['createSurface'].get('surfaceId', surface_id)
+        catalog_id = m['createSurface'].get('catalogId', catalog_id)
+    elif 'updateComponents' in m:
+        components = m['updateComponents'].get('components', [])
+        if 'surfaceId' in m['updateComponents']:
+            surface_id = m['updateComponents']['surfaceId']
+    elif 'updateDataModel' in m:
+        if 'value' in m['updateDataModel']:
+            data_model = m['updateDataModel']['value']
+
+if isinstance(payload.get('messages'), list):
+    for m in payload['messages']:
+        apply_message(m)
+elif payload.get('version') == 'v0.9':
+    apply_message(payload)
+elif isinstance(payload.get('components'), list):
+    components = payload['components']
+    surface_id = payload.get('surfaceId', surface_id)
+    catalog_id = payload.get('catalogId', catalog_id)
+    data_model = payload.get('dataModel', {})
+
+s = palinex.Surface(surface_id=surface_id or 'inspector', catalog_id=catalog_id)
+s.data = data_model
+for c in components:
+    if c.get('id'):
+        s._components[c['id']] = c
+if 'root' in s._components:
+    s._root_id = 'root'
+
+errors = []
+try:
+    s.validate(schemas=schemas, deep=True)
+except (ValueError, Exception) as e:
+    errors.append(str(e))
+
+try:
+    md = s.to_markdown() if s._root_id else '[no root — markdown unavailable]'
+except Exception as e:
+    md = f'[markdown generation failed: {e}]'
+
+json.dumps({'errors': errors, 'markdown': md})
+`;
+
+// ---- render ----
+
+function renderErrors() {
+  const all = [...state.structural.map(e => ({...e, source: 'structural'})), ...state.deep.map(m => ({cid: '-', kind: 'Schema', message: m, source: 'deep'}))];
+  document.getElementById('error-count').textContent = all.length ? `(${all.length})` : '';
+  const root = document.getElementById('errors-panel');
+  if (all.length === 0) {
+    render(html`<div class="empty" style="border:none; padding:8px;">${state.payload ? html`<span style="color: var(--ok);">✓ no errors</span>` : html`<span style="color: var(--muted);">no payload</span>`}</div>`, root);
+    return;
+  }
+  render(html`${all.map(e => html`
+    <div class="error">
+      <strong>[${e.source}]</strong>
+      ${e.cid && e.cid !== '-' ? html`<a href="#row-${e.cid}" @click=${(ev) => { ev.preventDefault(); state.selectedId = e.cid; rerender(); const r = document.getElementById(`row-${e.cid}`); if (r) r.scrollIntoView({block: 'center'}); }}>${e.cid}</a>: ` : nothing}
+      ${e.message}
+    </div>`)}`, root);
+}
+
+function renderTable() {
+  const filter = state.filter;
+  const errMap = new Map();
+  for (const e of state.structural) {
+    if (e.cid && e.cid !== '-') {
+      errMap.set(e.cid, [...(errMap.get(e.cid) || []), e.message]);
+    }
+  }
+  const rows = state.components
+    .filter(c => c && c.id)
+    .filter(c => {
+      if (filter === 'all') return true;
+      if (filter === 'err') return errMap.has(c.id);
+      if (filter === 'orphan') return state.roles[c.id]?.kind === 'orphan';
+      return true;
+    });
+  document.getElementById('comp-count').textContent = state.components.length ? `(${rows.length} of ${state.components.length})` : '';
+
+  const tbody = document.getElementById('comp-tbody');
+  render(rows.map(c => {
+    const role = state.roles[c.id] || {label: '-', kind: ''};
+    const errs = errMap.get(c.id);
+    const cls = [
+      state.selectedId === c.id ? 'selected' : '',
+      errs ? 'row-err' : '',
+      role.kind === 'orphan' ? 'row-orphan' : '',
+    ].filter(Boolean).join(' ');
+    return html`<tr id=${`row-${c.id}`} class=${cls} @click=${() => { state.selectedId = c.id; rerender(); }}>
+      <td><code>${c.id}</code></td>
+      <td>${c.component || '-'}</td>
+      <td>${role.label}</td>
+      <td>${errs ? html`<span class="pill err" title=${errs.join('; ')}>err</span>` : role.kind === 'orphan' ? html`<span class="pill warn">orphan</span>` : html`<span class="pill ok">ok</span>`}</td>
+    </tr>`;
+  }), tbody);
+}
+
+function renderPayload() {
+  const view = document.getElementById('payload-view');
+  if (!state.payload) {
+    render(html`<span style="color: var(--muted);">load a payload to begin</span>`, view);
+    document.getElementById('payload-meta').textContent = '';
+    return;
+  }
+  document.getElementById('payload-meta').textContent =
+    `${state.surfaceId || '(unnamed)'} · ${state.components.length} components · ${Object.keys(state.dataModel).length} data keys`;
+  const sel = state.selectedId;
+  const json = JSON.stringify(state.payload, null, 2);
+  if (!sel) {
+    view.textContent = json;
+    return;
+  }
+  // Highlight the selected component's id+block in the rendered JSON.
+  const needle = `"id": "${sel}"`;
+  const at = json.indexOf(needle);
+  if (at < 0) { view.textContent = json; return; }
+  // find enclosing object — walk back to {, forward to matching }
+  let s2 = at;
+  while (s2 > 0 && json[s2] !== '{') s2--;
+  let depth = 0, e = s2;
+  while (e < json.length) {
+    if (json[e] === '{') depth++;
+    else if (json[e] === '}') { depth--; if (depth === 0) { e++; break; } }
+    e++;
+  }
+  view.innerHTML = '';
+  view.appendChild(document.createTextNode(json.slice(0, s2)));
+  const mark = document.createElement('mark');
+  mark.textContent = json.slice(s2, e);
+  view.appendChild(mark);
+  view.appendChild(document.createTextNode(json.slice(e)));
+  setTimeout(() => mark.scrollIntoView({block: 'center', behavior: 'smooth'}), 50);
+}
+
+function renderMarkdown() {
+  const view = document.getElementById('markdown-view');
+  const stateEl = document.getElementById('md-state');
+  if (state.markdown) {
+    view.textContent = state.markdown;
+    stateEl.textContent = `(${state.markdown.split('\n').length} lines)`;
+  } else if (state.pyodideState === 'idle') {
+    render(html`<span style="color: var(--muted);">click "Validate (deep)" to render</span>`, view);
+    stateEl.textContent = 'deep-only';
+  } else {
+    render(html`<span style="color: var(--muted);">awaiting deep validation…</span>`, view);
+    stateEl.textContent = state.pyodideState;
+  }
+}
+
+function renderPaths() {
+  const root = document.getElementById('paths-panel');
+  const resolved = state.paths.filter(p => p.resolved);
+  const unresolved = state.paths.filter(p => !p.resolved);
+  document.getElementById('path-count').textContent = state.paths.length ? `(${resolved.length} ok, ${unresolved.length} miss)` : '';
+  if (state.paths.length === 0) {
+    render(html`<div style="color: var(--muted); padding: 4px; font-size: 12px;">no data-path references in payload</div>`, root);
+    return;
+  }
+  render(html`
+    ${resolved.length > 0 ? html`
+      <div style="margin-bottom: 8px;">
+        <div class="panel-title" style="margin-bottom: 4px;"><span class="pill ok">resolved</span> <span class="count">(${resolved.length})</span></div>
+        <div class="path-list">
+          ${resolved.map(p => html`<div class="path"><span class="ptr">${p.path}</span><span class="val">→ ${formatVal(p.value)}</span></div>`)}
+        </div>
+      </div>` : nothing}
+    ${unresolved.length > 0 ? html`
+      <div>
+        <div class="panel-title" style="margin-bottom: 4px;"><span class="pill warn">unresolved</span> <span class="count">(${unresolved.length})</span></div>
+        <div class="path-list">
+          ${unresolved.map(p => html`<div class="path"><span class="ptr" style="color: var(--warn);">${p.path}</span></div>`)}
+        </div>
+      </div>` : nothing}
+  `, root);
+}
+
+function formatVal(v) {
+  if (v === null) return 'null';
+  if (typeof v === 'string') return v.length > 60 ? `"${v.slice(0, 60)}…"` : `"${v}"`;
+  if (typeof v === 'object') return Array.isArray(v) ? `[${v.length} items]` : `{${Object.keys(v).length} keys}`;
+  return String(v);
+}
+
+function renderFooter() {
+  const pill = document.getElementById('state-pill');
+  const map = { idle: 'idle', 'loading-pyodide': 'loading…', 'loading-palinex': 'installing…', ready: 'ready', error: 'error' };
+  pill.textContent = map[state.pyodideState] || state.pyodideState;
+  pill.className = `state-pill ${state.pyodideState === 'ready' ? 'ready' : state.pyodideState === 'error' ? 'error' : state.pyodideState === 'idle' ? 'idle' : 'loading'}`;
+  const detail = document.getElementById('state-detail');
+  if (state.pyodideState === 'loading-pyodide' || state.pyodideState === 'loading-palinex') {
+    render(html`<span class="spinner"></span> ${state.pyodideDetail}`, detail);
+  } else {
+    detail.textContent = state.pyodideDetail;
+  }
+  document.getElementById('btn-deep').textContent =
+    state.pyodideState === 'ready' ? 'Re-validate' :
+    state.pyodideState === 'error' ? 'Retry' :
+    state.pyodideState === 'idle' ? 'Validate (deep) ↓ ~10 MB' :
+    '…';
+  document.getElementById('btn-deep').disabled = state.pyodideState === 'loading-pyodide' || state.pyodideState === 'loading-palinex';
+  document.getElementById('meta').textContent = state.payload
+    ? `loaded · ${state.surfaceId || '(unnamed)'} · ${state.components.length} components`
+    : 'no payload';
+}
+
+function rerender() {
+  renderErrors();
+  renderTable();
+  renderPayload();
+  renderMarkdown();
+  renderPaths();
+  renderFooter();
+}
+
+// ---- modals: paste, URL ----
+
+function showModal(title, contentFn, onSubmit, submitLabel = 'Load') {
+  const el = document.createElement('div');
+  el.className = 'modal-backdrop';
+  el.addEventListener('click', (e) => { if (e.target === el) el.remove(); });
+  el.innerHTML = `<div class="modal"><h3></h3><div class="body"></div><div class="modal-actions"><button class="cancel">Cancel</button><button class="primary submit" style="background:var(--accent);color:var(--accent-fg);border:none;padding:4px 12px;border-radius:4px;cursor:pointer;"></button></div></div>`;
+  el.querySelector('h3').textContent = title;
+  el.querySelector('.submit').textContent = submitLabel;
+  el.querySelector('.cancel').addEventListener('click', () => el.remove());
+  const bodyEl = el.querySelector('.body');
+  el.querySelector('.submit').addEventListener('click', () => { try { onSubmit(bodyEl); el.remove(); } catch (e) { alert(e.message); } });
+  document.body.appendChild(el);
+  contentFn(bodyEl);
+}
+
+function showPaste() {
+  showModal('Paste JSON payload', (body) => {
+    const ta = document.createElement('textarea');
+    ta.className = 'a2ui-input';
+    ta.placeholder = '{"version": "v0.9", "messages": [...]}';
+    body.appendChild(ta);
+    setTimeout(() => ta.focus(), 50);
+    body._input = ta;
+  }, (body) => {
+    const text = body._input.value.trim();
+    if (!text) return;
+    ingest(JSON.parse(text), 'paste');
+  });
+}
+
+function showUrl() {
+  showModal('Fetch JSON from URL', (body) => {
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'a2ui-input';
+    inp.style.width = '100%';
+    inp.placeholder = 'https://example.com/surface.json';
+    body.appendChild(inp);
+    setTimeout(() => inp.focus(), 50);
+    body._input = inp;
+  }, async (body) => {
+    const url = body._input.value.trim();
+    if (!url) return;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    ingest(await r.json(), 'url');
+  }, 'Fetch');
+}
+
+// ---- demo payload ----
+
+const DEMO_PAYLOAD = {
+  version: 'v0.9',
+  messages: [
+    { version: 'v0.9', createSurface: { surfaceId: 'inspector-demo', catalogId: 'a2ui.basic.v0_9' }},
+    { version: 'v0.9', updateDataModel: { surfaceId: 'inspector-demo', path: '/', value: {
+      title: 'Inspector demo',
+      items: [
+        { name: 'Alpha', detail: 'first item' },
+        { name: 'Beta', detail: 'second item' },
+      ],
+      missing_target: 'this exists',
+    }}},
+    { version: 'v0.9', updateComponents: { surfaceId: 'inspector-demo', components: [
+      { id: 'root', component: 'Column', children: ['title', 'items-list', 'orphaned-card'] },
+      { id: 'title', component: 'Text', text: { path: '/title' }, variant: 'h2' },
+      { id: 'items-list', component: 'List', direction: 'vertical',
+        children: { componentId: 'item-card', path: '/items' } },
+      { id: 'item-card', component: 'Card', child: 'item-col' },
+      { id: 'item-col', component: 'Column', children: ['item-name', 'item-detail'] },
+      { id: 'item-name', component: 'Text', text: { path: '/@item/name' }, variant: 'h4' },
+      { id: 'item-detail', component: 'Text', text: { path: '/@item/detail' } },
+      { id: 'orphaned-card', component: 'Card', child: 'orphan-text' },
+      { id: 'orphan-text', component: 'Text', text: 'I am only reachable via orphaned-card (demo of role detection).' },
+      { id: 'missing-ref', component: 'Text', text: { path: '/nonexistent/key' } },
+    ]}},
+  ]
+};
+
+// ---- event wiring ----
+
+document.getElementById('btn-load').addEventListener('click', () => document.getElementById('file-in').click());
+document.getElementById('file-in').addEventListener('change', async (e) => {
+  if (!e.target.files[0]) return;
+  try { ingest(JSON.parse(await e.target.files[0].text()), 'file'); }
+  catch (err) { alert(`Failed to parse JSON: ${err.message}`); }
+});
+document.getElementById('btn-paste').addEventListener('click', showPaste);
+document.getElementById('btn-url').addEventListener('click', showUrl);
+document.getElementById('btn-demo').addEventListener('click', () => ingest(DEMO_PAYLOAD, 'demo'));
+document.getElementById('btn-deep').addEventListener('click', runDeepValidate);
+document.getElementById('filter').addEventListener('change', (e) => { state.filter = e.target.value; rerender(); });
+
+// Drag and drop
+const main = document.getElementById('main');
+main.addEventListener('dragover', (e) => { e.preventDefault(); main.classList.add('drag-over'); });
+main.addEventListener('dragleave', () => main.classList.remove('drag-over'));
+main.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  main.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+  try { ingest(JSON.parse(await file.text()), 'drop'); }
+  catch (err) { alert(`Failed to parse JSON: ${err.message}`); }
+});
+
+// postMessage ingest (parity with index.html)
+window.addEventListener('message', (e) => {
+  const m = e.data;
+  if (!m || typeof m !== 'object') return;
+  if (m.type === 'a2ui.load' && m.payload) ingest(m.payload, 'postMessage');
+});
+
+// URL param loading
+const params = new URLSearchParams(location.search);
+if (params.get('surface')) {
+  fetch(params.get('surface')).then(r => r.json()).then(p => ingest(p, 'url-param'))
+    .catch(e => alert(`Surface fetch failed: ${e.message}`));
+} else if (params.get('payload')) {
+  try { ingest(JSON.parse(atob(decodeURIComponent(params.get('payload')))), 'base64-param'); }
+  catch (e) { alert(`Base64 decode failed: ${e.message}`); }
+}
+
+rerender();
+</script>
+</body>
+</html>
