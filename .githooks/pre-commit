@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# palinex pre-commit hook
+#
+# Fast guardrails (target <1s). Heavy checks (full pytest) live in pre-push.
+#
+# Enforces palinex's load-bearing protocols on staged content:
+#   1. HTML files stay under 900 LOC (html-tool-patterns skill hard stop)
+#   2. CDN URLs in HTML/JS are version-pinned (no @latest, no bare URLs)
+#   3. pytest --collect-only catches syntax errors in any staged .py
+#
+# Skip with --no-verify if you must.
+
+set -e
+
+RED=$'\033[0;31m'
+YELLOW=$'\033[0;33m'
+GREEN=$'\033[0;32m'
+RESET=$'\033[0m'
+
+fail() { echo "${RED}✗ pre-commit:${RESET} $*" >&2; exit 1; }
+warn() { echo "${YELLOW}⚠ pre-commit:${RESET} $*" >&2; }
+ok()   { echo "${GREEN}✓${RESET} $*"; }
+
+staged_files() { git diff --cached --name-only --diff-filter=ACM; }
+
+# --- HTML LOC check ---
+html_over_limit=()
+for f in $(staged_files | grep -E '\.html$' || true); do
+  [ -f "$f" ] || continue
+  loc=$(wc -l < "$f" | tr -d ' ')
+  if [ "$loc" -gt 900 ]; then
+    html_over_limit+=("$f ($loc lines)")
+  elif [ "$loc" -gt 600 ]; then
+    warn "$f is $loc lines (warn threshold 600, stop 900)"
+  fi
+done
+if [ ${#html_over_limit[@]} -gt 0 ]; then
+  fail "HTML file(s) exceed 900 LOC hard stop (html-tool-patterns skill):
+  ${html_over_limit[*]}
+Trim or split. To override after deliberate threshold review, raise the
+limit in this hook AND in ~/.claude/skills/html-tool-patterns/SKILL.md."
+fi
+
+# --- CDN pin check ---
+unpinned=()
+for f in $(staged_files | grep -E '\.(html|js)$' || true); do
+  [ -f "$f" ] || continue
+  if grep -nE 'cdn\.jsdelivr\.net/npm/[^@/]+(/|")' "$f" >/dev/null 2>&1; then
+    matches=$(grep -nE 'cdn\.jsdelivr\.net/npm/[^@/]+(/|")' "$f")
+    unpinned+=("$f: $matches")
+  fi
+  if grep -nE 'cdn\.jsdelivr\.net/npm/[^"]*@latest' "$f" >/dev/null 2>&1; then
+    matches=$(grep -nE 'cdn\.jsdelivr\.net/npm/[^"]*@latest' "$f")
+    unpinned+=("$f: $matches")
+  fi
+done
+if [ ${#unpinned[@]} -gt 0 ]; then
+  fail "Unpinned CDN URL(s) detected (html-tool-patterns invariant #3):
+  ${unpinned[*]}
+Use a specific version, e.g. lit-html@3.2.1 not lit-html or lit-html@latest."
+fi
+
+# --- Python syntax sanity (collect-only is fast) ---
+py_staged=$(staged_files | grep -E '\.py$' || true)
+if [ -n "$py_staged" ]; then
+  if [ -x ".venv/bin/pytest" ]; then
+    PYTHONPATH=. .venv/bin/pytest --collect-only -q tests/ >/dev/null 2>&1 || fail "pytest collection failed (syntax error in staged Python?)"
+  elif command -v pytest >/dev/null 2>&1; then
+    PYTHONPATH=. pytest --collect-only -q tests/ >/dev/null 2>&1 || fail "pytest collection failed (syntax error in staged Python?)"
+  else
+    warn "pytest not found; skipping Python syntax check"
+  fi
+fi
+
+ok "pre-commit checks passed"

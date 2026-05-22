@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# palinex pre-push hook
+#
+# Heavier check: run the full pytest suite before any push. Cheap enough
+# (~50ms for the 28-test suite) to run on every push without friction.
+#
+# Skip with --no-verify if you must, but the CI matrix will catch it on
+# pushes to main anyway.
+
+set -e
+
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+RESET=$'\033[0m'
+
+fail() { echo "${RED}✗ pre-push:${RESET} $*" >&2; exit 1; }
+ok()   { echo "${GREEN}✓${RESET} $*"; }
+
+if [ -x ".venv/bin/pytest" ]; then
+  PYTHONPATH=. .venv/bin/pytest -q tests/ >/dev/null || fail "test suite failed; aborting push"
+elif command -v pytest >/dev/null 2>&1; then
+  PYTHONPATH=. pytest -q tests/ >/dev/null || fail "test suite failed; aborting push"
+else
+  echo "pytest not found; install with: pip install pytest jsonschema" >&2
+  echo "skipping test suite — CI will catch any failures on push to main" >&2
+fi
+
+ok "pre-push: tests pass"
