@@ -4,6 +4,18 @@ End-to-end sequence for the static-snapshot path: user types a prompt → Claude
 
 Documents process boundaries (the load-bearing detail) so each hop is explicit. Implements RDR-127 (nexus integration) on top of palinex RDR-001 (architecture).
 
+## Scope: which product this describes
+
+This diagram is **specifically for Claude Code — the developer product — running as the desktop Electron app**. Other host configurations differ:
+
+| Product | MCP UI resource handling | What changes vs this diagram |
+|---|---|---|
+| **Claude Code — desktop (Electron)** | First-class; renders inline as an iframe | This diagram applies directly. |
+| **Claude Code — CLI (terminal)** | Terminal can't render HTML. Behavior is host-implementation-specific: likely either dropped, written to a temp file, or handed off to the system browser (`open <file>`). | Drop processes A' (Chromium renderer) and A'' (outer iframe inside A'). If the temp-file path is taken AND the user opens it, the iframe chain re-appears inside the system browser (Safari/Chrome) — but rooted in that separate app, not in the CLI process. |
+| **Claude Chat — desktop or web** | MCP UI resources are not part of the consumer feature set (as of this writing). MCP is a developer-product capability. | Not applicable. |
+
+If you're reading this in a CLI session, the multi-process Electron path described below is *not* what's happening in your terminal — verify the actual handling by calling `render_surface` and observing.
+
 ## Diagram
 
 ```mermaid
