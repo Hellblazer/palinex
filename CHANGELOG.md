@@ -4,6 +4,17 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.0.6] — 2026-05-22
+
+Wrapped-demo variant in the standalone renderer.
+
+### Added
+- Renderer `?demo=wrapped` URL parameter renders the same demo payload as `?demo=1` but with palinex 0.0.5's `wrap_as_mcp_ui_resource` pre-resolution logic applied in JS — chash references in the data model are substituted with text, and `openChash` Button actions are rewritten to `copyToClipboard`. Demonstrates the wrap end-state without a real producer or chash store; click "Open chunk" → resolved text in clipboard, no host bridge dead-end modal.
+- Empty-state link "try the wrapped variant" alongside the existing "render demo" button.
+
+### Why
+Previously the hosted standalone demo showed the host-bridge dead-end modal when users clicked "Open chunk" — accurate documentation of standalone behavior but confusing as a first experience. The wrapped variant shows the alternative path (palinex pre-resolution) inline, so users can see both architectural modes from the same hosted page.
+
 ## [0.0.5] — 2026-05-22
 
 MCP UI resource helper for embedding palinex surfaces inside Claude Code (or any host that consumes MCP UI Apps).

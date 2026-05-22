@@ -101,7 +101,10 @@
 postMessage({type:'a2ui.load', payload:{...}})</code></pre>
     <p>Or load a JSON file:</p>
     <button id="btn-load-empty">choose file…</button>
-    <p style="margin-top:24px"><button id="btn-demo">render demo</button></p>
+    <p style="margin-top:24px">
+      <button id="btn-demo">render demo</button>
+      <a href="?demo=wrapped" style="margin-left:8px; font-size:12px; color: var(--muted);">or try the wrapped variant →</a>
+    </p>
   </div>
 </main>
 
@@ -753,6 +756,51 @@ document.getElementById('file-in').addEventListener('change', async (e) => {
   }
 });
 document.getElementById('btn-demo')?.addEventListener('click', () => setSurface(DEMO));
+
+// Built-in chunks for the wrapped-demo variant (?demo=wrapped). Mirrors what
+// a real producer's chash_resolver would return; demonstrates the
+// `wrap_as_mcp_ui_resource` end-state — openChash actions become
+// copyToClipboard, payload data model carries resolved text inline,
+// no host bridge required for the surface to be useful.
+const DEMO_WRAPPED_CHUNKS = {
+  'demo-1-abcd1234':
+    'This text was substituted into the data model by ' +
+    'palinex.wrap_as_mcp_ui_resource at producer-side wrap time. ' +
+    'The "Open chunk" button you clicked was rewritten to copyToClipboard, ' +
+    'and this paragraph is now in your clipboard. No live host bridge involved.',
+  'demo-2-ef567890':
+    'Same pattern — producer pre-resolved the chash reference against its ' +
+    'data source (e.g. nexus T3) before emitting the HTML. The renderer ' +
+    'rendered the resolved text inline; the button click was a pure ' +
+    'browser copy-to-clipboard. Static-snapshot integration in one step.',
+};
+
+function applyDemoWrap(payload) {
+  // Mirrors palinex.wrap_as_mcp_ui_resource pre-resolve logic in JS so the
+  // hosted demo can exhibit the wrapped end-state without running Python.
+  const resolver = (s) => DEMO_WRAPPED_CHUNKS[s] ?? null;
+  const p = JSON.parse(JSON.stringify(payload));
+  const walk = (n) => {
+    if (typeof n === 'string') { const r = resolver(n); return r != null ? r : n; }
+    if (Array.isArray(n)) return n.map(walk);
+    if (n && typeof n === 'object') { const o = {}; for (const k of Object.keys(n)) o[k] = walk(n[k]); return o; }
+    return n;
+  };
+  for (const m of (p.messages || [])) {
+    if (m.updateDataModel && 'value' in m.updateDataModel) {
+      m.updateDataModel.value = walk(m.updateDataModel.value);
+    }
+    if (m.updateComponents && Array.isArray(m.updateComponents.components)) {
+      for (const c of m.updateComponents.components) {
+        if (c.component === 'Button' && c.action?.functionCall?.call === 'openChash') {
+          const chashArg = c.action.functionCall.args?.chash;
+          c.action = { functionCall: { call: 'copyToClipboard', args: { value: chashArg }, returnType: 'void' } };
+        }
+      }
+    }
+  }
+  return p;
+}
 document.getElementById('btn-copy-md').addEventListener('click', async () => {
   if (!state.rootId) return;
   await navigator.clipboard.writeText(toMarkdown());
@@ -780,6 +828,10 @@ if (params.get('surface')) {
 } else if (params.get('payload')) {
   try { setSurface(JSON.parse(atob(decodeURIComponent(params.get('payload'))))); }
   catch (e) { state.error = `decode failed: ${e.message}`; rerender(); }
+} else if (params.get('demo') === 'wrapped') {
+  setSurface(applyDemoWrap(DEMO));
+  document.getElementById('meta').textContent =
+    `v0.9 · demo.nx_answer (wrapped — chashes pre-resolved, openChash → copyToClipboard) · 14 components`;
 } else if (params.get('demo') === '1') {
   setSurface(DEMO);
 }
