@@ -605,8 +605,14 @@ function applyMessage(msg) {
     ingestComponents(msg.updateComponents.components);
   } else if (msg.updateDataModel) {
     const path = msg.updateDataModel.path || '/';
-    if ('value' in msg.updateDataModel) jsonPointerSet(state.dataModel, path, msg.updateDataModel.value);
-    else jsonPointerSet(state.dataModel, path, undefined);
+    const hasValue = 'value' in msg.updateDataModel;
+    if (path === '/' || path === '') {
+      state.dataModel = hasValue && msg.updateDataModel.value != null ? msg.updateDataModel.value : {};
+    } else if (hasValue) {
+      jsonPointerSet(state.dataModel, path, msg.updateDataModel.value);
+    } else {
+      jsonPointerSet(state.dataModel, path, undefined);
+    }
   } else if (msg.deleteSurface) {
     state.surface = null; state.index = {}; state.dataModel = {}; state.rootId = null;
   }
