@@ -4,6 +4,10 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.0.3] — 2026-05-22
+
+First Pyodide-augmented release plus a load-bearing renderer fix.
+
 ### Fixed
 - Renderer (`index.html`) `applyMessage` now correctly handles `updateDataModel` messages with `path: "/"` (root replacement). Previously the data model stayed `{}` because `jsonPointerSet` at root returns the value without mutating — caller now branches on root path and assigns directly. Visible as "template path /citations is not an array" on the hosted demo; now resolves correctly.
 
