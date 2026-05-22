@@ -1,17 +1,32 @@
-# surface-render
+# palinex
 
-Single-file HTML renderer for [a2ui v0.9](https://a2ui.org/) surfaces, plus a Python producer-side helper and a host-bridge wrapper.
+**palin-** (Greek, "again") **+ nexus** (Latin, "bond") — surfaces get rewritten.
 
-## Files
+A small library + reference renderer for [a2ui v0.9](https://a2ui.org/) surfaces. Each `updateComponents` and `updateDataModel` rewrites what came before; the rendering surface is the bond that the agent revises in place.
 
-- **`index.html`** — the renderer. Open in a browser. Accepts a2ui v0.9 message envelopes via URL param, file picker, or postMessage. lit-html from CDN, no build step.
-- **`host-bridge.html`** — reference wrapper that embeds the renderer in an iframe and implements the `a2ui.request`/`a2ui.response` postMessage protocol. For environments (web hosts, MCP UI resources) that need to relay chash resolution back to a data source.
-- **`producer.py`** — Python builders that emit v0.9-conformant payloads from typed inputs. Structural validation built in; optional jsonschema deep validation.
-- **`A2UI-V09-DIVERGENCE.md`** — audit notes from validating the initial sketch against the v0.9 spec.
+## What's in here
+
+- **`palinex/`** — Python package. Typed builders that emit v0.9-conformant payloads from native Python; structural validation built in, optional jsonschema deep validation via `pip install palinex[validate]`.
+- **`index.html`** — single-file HTML renderer. Open in a browser. Accepts v0.9 message envelopes via URL param, file picker, or postMessage. lit-html from CDN, no build step.
+- **`host-bridge.html`** — reference wrapper that embeds the renderer in an iframe and implements the `a2ui.request` / `a2ui.response` postMessage protocol. For hosts (Claude Code MCP UI resources, custom web shells) that bridge agent-side data sources to the renderer.
+- **`A2UI-V09-DIVERGENCE.md`** — audit notes against the v0.9 spec; documents the structural choices the renderer and producer make.
+
+## Install
+
+```bash
+pip install palinex                  # builders only
+pip install palinex[validate]        # + jsonschema for deep validation
+```
+
+Or clone for the renderer + host bridge:
+
+```bash
+git clone https://github.com/Hellblazer/palinex
+```
 
 ## Quick start
 
-Open the renderer with the built-in demo:
+Renderer with the built-in demo:
 
 ```bash
 open index.html?demo=1
@@ -19,24 +34,29 @@ open index.html?demo=1
 
 Generate a payload from Python and pipe it in:
 
-```bash
-python3 producer.py > demo.json
-open "index.html?payload=$(python3 -c 'import base64,sys;print(base64.b64encode(sys.stdin.buffer.read()).decode())' < demo.json)"
+```python
+from palinex import Surface, DataPath
+
+s = Surface(surface_id="demo", catalog_id="a2ui.basic.v0_9")
+s.data["greeting"] = "Hello, surface."
+body = s.column([
+    s.text(path="/greeting", variant="h2"),
+    s.divider(),
+    s.button(s.text("Click me"), action=s.open_url("https://example.com")),
+])
+s.set_root(body)
+print(s.to_json())               # v0.9 message-envelope payload
+print(s.to_markdown())           # lossless markdown sidecar
+s.validate()                     # structural pass
 ```
 
-Run the host-bridge wrapper (mock backend by default):
-
-```bash
-open host-bridge.html
-```
-
-## URL params
+The hosted renderer at <https://hellblazer.github.io/palinex/> accepts payloads via:
 
 | Param | Effect |
 |---|---|
 | `?surface=<url>` | Fetch payload JSON from URL |
-| `?payload=<base64>` | Decode payload from URL (good for sharing) |
-| `?demo=1` | Render built-in demo |
+| `?payload=<base64>` | Decode inline payload (good for sharing) |
+| `?demo=1` | Render the built-in demo |
 
 ## Component coverage
 

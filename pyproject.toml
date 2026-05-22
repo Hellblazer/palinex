@@ -1,0 +1,53 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "palinex"
+version = "0.0.1"
+description = "Typed Python builders + single-file HTML renderer for a2ui v0.9 surfaces. palin- (again) + nexus (bond) — surfaces get rewritten."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Hal Hildebrand", email = "hellblazer@me.com" },
+]
+keywords = ["a2ui", "ui", "agent", "rendering", "surface", "declarative"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: User Interfaces",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+validate = ["jsonschema>=4"]
+
+[dependency-groups]
+dev = ["pytest>=8", "jsonschema>=4"]
+
+[project.urls]
+Homepage = "https://github.com/Hellblazer/palinex"
+Repository = "https://github.com/Hellblazer/palinex"
+Renderer = "https://hellblazer.github.io/palinex/"
+Issues = "https://github.com/Hellblazer/palinex/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["palinex"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "palinex/",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+    "A2UI-V09-DIVERGENCE.md",
+    "index.html",
+    "host-bridge.html",
+]
