@@ -255,6 +255,22 @@ function saveCfg() {
   localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
 }
 
+// ---- Reference backend methods (RDR-001 §Item 7 first-class + extensions) ---
+//
+// Each method has three resolver paths a host can plug into:
+//   1. MOCK_BACKEND        — stub responses for local development / demo
+//   2. HTTP_BACKEND(url)   — POST to a sidecar HTTP service (e.g. nexus daemon
+//                             on http://localhost:PORT)
+//   3. window.hostBridgeResolver — a JS object the embedder injects to route
+//                             through a custom channel (MCP tool call from a
+//                             Tauri host, an in-page WebSocket, etc.)
+//
+// `getBackend()` picks the first available in that order. Adding a new method
+// means adding handlers to BOTH MOCK_BACKEND and HTTP_BACKEND (so the demo
+// works out-of-the-box AND a real sidecar can serve it). The trust gate
+// (§trustGateCheck) is consulted before `handleRequest` dispatches to whichever
+// backend is active, so all methods inherit the same per-producer policy.
+
 const MOCK_BACKEND = {
   async openChash({ chash }) {
     return {
@@ -263,7 +279,24 @@ const MOCK_BACKEND = {
     };
   },
   async runSkill({ name, args }) {
+    // Nexus-style skill dispatch. Params: {name: string, args?: object}.
+    // Result: {result: string | object}. Hosts that bridge to a real
+    // nexus daemon should fetch from {baseUrl}/skill/{name} with args
+    // as the POST body — see HTTP_BACKEND.runSkill.
     return { result: `[mock] skill ${name} called with ${JSON.stringify(args)}` };
+  },
+  async openFile({ path, line, column }) {
+    // Editor-host file-open dispatch. Params: {path: string, line?: number,
+    // column?: number}. A real editor-host (VS Code webview, Cursor, JetBrains
+    // remote) would route this to its own openTextDocument / revealRange API.
+    // The mock just echoes the would-be-action so the demo log shows what the
+    // bridge received.
+    const loc = line != null ? `:${line}${column != null ? ':' + column : ''}` : '';
+    return {
+      opened: false,
+      reason: 'mock-backend',
+      message: `[mock] would open ${path}${loc} — replace MOCK_BACKEND.openFile with a real editor-host resolver to actually open it`,
+    };
   },
 };
 
@@ -280,6 +313,15 @@ const HTTP_BACKEND = (baseUrl) => ({
       body: JSON.stringify(args || {}),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${baseUrl}/skill/...`);
+    return await resp.json();
+  },
+  async openFile({ path, line, column }) {
+    const resp = await fetch(`${baseUrl}/file/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, line, column }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${baseUrl}/file/open`);
     return await resp.json();
   },
 });

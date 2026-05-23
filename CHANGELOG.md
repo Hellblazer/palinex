@@ -47,6 +47,17 @@ A code-review-expert pass on the just-merged trust-gate work surfaced two critic
 
 13 new tests in `tests/test_signing.py` and `tests/test_trust_gate.py` cover: nested non-finite floats at depth > 1, list-of-dict non-finite, non-string dict keys, `bool` round-trip, three `valid_until` cases (future/past/absent), source-regex assertions on both new bridge gate branches, byte-level JCS canonicalization stability (number formatting `1.0 → "1"`, key sort order), and Unicode NFC/NFD preservation (no normalization).
 
+### Phase 3 closeout (RDR-001 Items 2 + 3)
+
+The two remaining RDR-001 Phase 3 items shipped together (palinex-i10, palinex-xwr), formally closing out the action-registry-hardening epic:
+
+- **`runSkill` formalised in `web/host-bridge.html`** — handler was already present in both `MOCK_BACKEND` and `HTTP_BACKEND` (it shipped alongside the trust-gate work because the gate's scenarios exercise it). Now formally tested via `tests/test_host_bridge.py` — regex asserts the handler exists in both backends, that `HTTP_BACKEND.runSkill` POSTs to `{baseUrl}/skill/{name}`, and that the param shape stays `{name, args}`. Catches silent rename or removal.
+- **`openFile` added to `web/host-bridge.html`** — new `MOCK_BACKEND.openFile` and `HTTP_BACKEND.openFile` handlers. Param shape `{path: string, line?: number, column?: number}`. Mock returns `{opened: false, reason: 'mock-backend', message: …}` so callers can branch on the no-op signal. HTTP backend POSTs to `{baseUrl}/file/open`. The handler is documented for editor-host integrations (VS Code webview, Cursor, JetBrains remote) that route through their native `openTextDocument` / `revealRange` APIs.
+- **Reference-backend documentation block** — comment at the top of `MOCK_BACKEND` enumerates the three resolver paths a host can plug into: `MOCK_BACKEND` (demo / local development), `HTTP_BACKEND(baseUrl)` (sidecar service like a nexus daemon), `window.hostBridgeResolver` (embedder-injected object for Tauri / custom WebSocket / MCP). `getBackend()` picks the first available in that order. Future method additions follow the same pattern: add to both `MOCK_BACKEND` and `HTTP_BACKEND` so the demo works out-of-the-box AND a real sidecar can serve it.
+- **`tests/test_host_bridge.py`** (11 conformance checks) — backend registry shape, both methods declared in both backends with the documented param shapes, mock openFile returns the documented signal shape, resolver-path documentation present, LOC budget guard (warn at 600 / hard at 900 per `html-tool-patterns`).
+
+With these landings, **RDR-001 Phase 3 is complete**: all four Items checked off (protocol doc + `runSkill` + `openFile` + trust-gate). The epic `palinex-7n1` is closeable.
+
 ## [0.3.0] — 2026-05-23
 
 Hardening release. Sweeps up the host-bridge and bundle work that shipped on main between 0.2.0 and now, plus the marketplace conversion to a pinned-source release model so future main commits don't surprise installed users. RDR-001 and RDR-003 both formally accepted in this cycle.
