@@ -1,8 +1,8 @@
 # palinex × nexus × Claude Code — sequence diagram
 
-End-to-end sequence for the static-snapshot path: user types a prompt → Claude decides to render a surface → nexus MCP tool produces an MCP UI resource → Claude Code renders it as a sandboxed iframe → user sees the surface inline.
+End-to-end sequence for the static-snapshot path: user types a prompt → Claude decides to render a surface → **palinex MCP server** produces an MCP UI resource → Claude Code renders it as a sandboxed iframe → user sees the surface inline.
 
-Documents process boundaries (the load-bearing detail) so each hop is explicit. Implements RDR-127 (nexus integration) on top of palinex RDR-001 (architecture).
+Documents process boundaries (the load-bearing detail) so each hop is explicit. Implements palinex RDR-003 (packaging: plugin + nexus-front-end role). Note: nexus RDR-127 v2 records the corresponding non-decision on the nexus side — nexus ships no surface-rendering code; palinex depends on nexus (via the `[nexus]` extra), not vice versa.
 
 ## Scope: which product this describes
 
@@ -34,9 +34,10 @@ sequenceDiagram
         participant InnerFrame as Inner iframe<br/>(palinex renderer<br/>from github.io)
     end
 
-    box rgba(255,220,200,0.15) Process B — nexus MCP server (Python subprocess)
-        participant NexusMCP as FastMCP("nexus")<br/>render_surface tool
-        participant Palinex as palinex<br/>(library, in-process)
+    box rgba(255,220,200,0.15) Process B — palinex MCP server (Python subprocess)
+        participant PalinexMCP as FastMCP("palinex")<br/>render_surface tool
+        participant Bridge as palinex.nexus_bridge<br/>(lazy import shim)
+        participant Palinex as palinex<br/>(wrap_as_mcp_ui_resource)
     end
 
     box rgba(220,255,220,0.15) Process C / network
@@ -48,26 +49,26 @@ sequenceDiagram
     User->>ChatUI: 1. types prompt<br/>"show me chunks X, Y as a surface"
     ChatUI->>Main: 2. Electron IPC (prompt event)
     Main->>Main: 3. Claude (agent) chooses<br/>render_surface(payload)
-    Note over Main,NexusMCP: process boundary: stdio JSON-RPC<br/>(Claude Code → MCP subprocess)
-    Main->>NexusMCP: 4. tools/call render_surface(payload, collection)
+    Note over Main,PalinexMCP: process boundary: stdio JSON-RPC<br/>(Claude Code → MCP subprocess)
+    Main->>PalinexMCP: 4. tools/call render_surface(payload, collection)
 
     %% — chash resolution loop (inside Process B) —
-    NexusMCP->>Palinex: 5. wrap_as_mcp_ui_resource(<br/>payload, chash_resolver)
+    PalinexMCP->>Palinex: 5. wrap_as_mcp_ui_resource(<br/>payload, chash_resolver=Bridge.chash_resolver)
     loop for each string in data model
-        Palinex->>NexusMCP: 6. chash_resolver(candidate)<br/>(callable, in-process)
+        Palinex->>Bridge: 6. chash_resolver(candidate)<br/>(callable, in-process)
         alt 32-char lowercase hex
-            NexusMCP->>T3: 7. t3.get_by_id(collection, chash)
-            T3-->>NexusMCP: 8. chunk content or None
+            Bridge->>T3: 7. t3.get_by_id(collection, chash)<br/>(via nexus.mcp_infra.get_t3)
+            T3-->>Bridge: 8. chunk content or None
         else not chash-shaped
-            NexusMCP-->>Palinex: (skip; return None)
+            Bridge-->>Palinex: (skip; return None)
         end
-        NexusMCP-->>Palinex: 9. resolved text or None
+        Bridge-->>Palinex: 9. resolved text or None
     end
     Palinex->>Palinex: 10. substitute resolved text<br/>+ rewrite Button.openChash<br/>→ Button.copyToClipboard
-    Palinex-->>NexusMCP: 11. HTML wrapper string
+    Palinex-->>PalinexMCP: 11. HTML wrapper string
 
     %% — return path —
-    NexusMCP-->>Main: 12. tools/call response<br/>{type:"resource", resource:<br/>{uri, mimeType:"text/html", text}}
+    PalinexMCP-->>Main: 12. tools/call response<br/>{type:"resource", resource:<br/>{uri, mimeType:"text/html", text}}
     Note over Main,ChatUI: process boundary: Electron IPC<br/>(Node main → Chromium renderer)
     Main->>ChatUI: 13. render UI resource inline
     ChatUI->>OuterFrame: 14. create iframe with wrapper HTML
@@ -103,8 +104,8 @@ sequenceDiagram
 | **A'** Chromium renderer process | OS process (Electron IPC to A) | Electron contextBridge / IPC channels | Hosts the chat UI; renders messages including MCP UI resources |
 | **A''** Outer iframe | Browsing context inside A' (may stay same OS process or go cross-process under site-isolation) | DOM + postMessage to parent | Loaded with the wrapper HTML returned by `render_surface` |
 | **A'''** Inner iframe | Browsing context, cross-origin to A' (almost certainly a separate OS process under Chromium site-isolation, since it loads from `hellblazer.github.io` ≠ Claude Code's origin) | postMessage to A''; cannot read A'' DOM | The actual palinex renderer (`index.html` + lit-html) |
-| **B** nexus MCP server | OS process (Python subprocess of A) | stdio JSON-RPC | Spawned by A at session start; lives for the session |
-| **C** T3 ChromaDB | In-process with B (local mode) OR separate machine (cloud mode) | direct calls / HTTPS | Configurable; nexus picks based on env |
+| **B** palinex MCP server | OS process (Python subprocess of A) | stdio JSON-RPC | Spawned by A at session start via the `palinex-mcp` console script declared in the Claude Code plugin's `.mcp.json`. Imports `palinex.nexus_bridge` lazily on first chash; that module imports nexus internals via `nexus.mcp_infra.get_t3` + `nexus.corpus.t3_collection_name`. |
+| **C** T3 ChromaDB | In-process with B (local mode) OR separate machine (cloud mode) | direct calls / HTTPS | Configurable; nexus picks based on env. Process B's address space holds the nexus client objects — no separate nexus process exists in this picture. |
 | **CDN** | Network | HTTPS | jsDelivr for lit-html ESM, GitHub Pages for `index.html` |
 
 ## What crosses each boundary in this sequence
@@ -145,14 +146,16 @@ A''' (click)
 
 | Repo | What runs where |
 |---|---|
-| `palinex` (this repo) | Steps 5, 10, 11 (the `wrap_as_mcp_ui_resource` helper) run in B as an imported library. Steps 20, 22, 25 (the renderer) run in A''' as the loaded HTML. |
-| `nexus` | Steps 4, 6, 9, 12 (the MCP tool registration + chash resolver) run in B. Plus the entry-point handshake to spawn B as a subprocess at A's startup. |
-| `Claude Code` (upstream Anthropic) | Steps 2, 3, 13, 14, 23 (the host) — agent decision, MCP client, UI resource rendering. |
-| Upstream open source | a2ui v0.9 spec (Google) shapes the payload format. lit-html (Google) is the renderer's only runtime dep. |
+| `palinex` (this repo) | Steps 4, 11, 12 (the MCP tool registration + return path) run in B as part of the `palinex-mcp` console script. Steps 5, 10 (the `wrap_as_mcp_ui_resource` helper) run in B as in-process library calls. Steps 6, 9 (the `nexus_bridge` chash resolver — including the lazy nexus imports) run in B. Steps 20, 22, 25 (the renderer) run in A''' as the loaded HTML. |
+| `nexus` (depended on via `palinex[nexus]` extra) | Steps 7, 8 (T3 lookup). Imported by palinex.nexus_bridge inside Process B; nexus contributes the T3 client objects but does not run as a separate process. |
+| `Claude Code` (upstream Anthropic) | Steps 2, 3, 13, 14, 23 (the host) — agent decision, MCP client, UI resource rendering. Also spawns Process B at session boot via the plugin's `.mcp.json`. |
+| Upstream open source | a2ui v0.9 spec (Google) shapes the payload format. lit-html (Google) is the renderer's only runtime dep. FastMCP is the MCP server framework B uses. |
 
 ## See also
 
-- `docs/rdr/rdr-001-architecture.md` — palinex architecture decisions
+- `docs/rdr/rdr-001-architecture.md` — palinex architecture decisions (a2ui v0.9 IR, three delivery shapes, postMessage RPC, markdown sidecar)
 - `docs/rdr/rdr-002-pyodide-as-runtime-augmentation.md` — Pyodide-as-default policy
-- nexus `docs/rdr/rdr-127-substrate-decoupled-surface-rendering.md` — integration RDR
-- `host-bridge.html` — reference implementation of the bidirectional protocol (for interactive flows)
+- `docs/rdr/rdr-003-plugin-and-source-layout.md` — packaging: Claude Code plugin + nexus-front-end role + `src/` layout
+- nexus `docs/rdr/rdr-127-substrate-decoupled-surface-rendering.md` — the corresponding non-decision on the nexus side (nexus ships no surface-rendering code; palinex is downstream)
+- `web/host-bridge.html` — reference implementation of the bidirectional postMessage protocol for the future interactive-flows path
+- `plugin/` — the Claude Code plugin scaffolding that ships this integration

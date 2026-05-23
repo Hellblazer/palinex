@@ -4,6 +4,34 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.1.0] — 2026-05-22
+
+Major restructure: palinex is now the **UI front-end for nexus** — library + Claude Code plugin + Pyodide-loaded inspector. Builds on the 0.0.6 wrapped-demo variant by superseding the inline JS workaround with the proper Pyodide-driven live-render panel in the inspector.
+
+### Added
+- **Claude Code plugin** (`plugin/` directory): manifest, MCP server registration, two skills (`palinex-overview`, `surface-emission`), and a `/palinex-render` command. Installable via `/plugin install` from this repo. Auto-starts the palinex MCP server at Claude Code session boot.
+- **MCP server** (`src/palinex/mcp/`): FastMCP server exposing one tool, `render_surface(payload, title, collection, renderer_url)`. Console script `palinex-mcp` declared via `[project.scripts]`.
+- **nexus integration shim** (`src/palinex/nexus_bridge.py`): lazy import of nexus internals; `chash_resolver(chash)` validates RDR-108 32-char hex shape, looks up via T3, returns chunk text or None. Cached import outcome (success or ImportError) for O(1) repeat calls. Behind the `[nexus]` extra.
+- **`[nexus]` and `[mcp]` and `[all]` optional dependency extras** in `pyproject.toml`. Library install (`pip install palinex`) stays nexus-free; full integration is `pip install palinex[all]`.
+- **Inspector live-render tab** (`web/inspector.html`): tabbed right column (Markdown / Paths / Live render). Live tab has editable textarea + Re-render button + iframe pointing at `./index.html`. postMessage delivers payload to the iframe; edits and re-renders work without leaving the page. Subsumes any need for a separate playground page.
+- **RDR-003** (`docs/rdr/rdr-003-plugin-and-source-layout.md`): codifies the packaging decisions — Claude Code plugin, nexus-front-end role, src/ + web/ + plugin/ layout, no HTTP sidecar (per RDR-002 Pyodide-as-default).
+- 24 new tests bring total to 59 (13 for nexus_bridge, 11 for the MCP server) — all green across the Python 3.10–3.13 matrix.
+
+### Changed
+- **Source layout**: `palinex/` → `src/palinex/` (standard src-layout). Tests find the package via `[tool.pytest.ini_options] pythonpath = ["src"]` — no PYTHONPATH=. needed.
+- **Static frontend**: `index.html`, `host-bridge.html`, `inspector.html` → `web/`. GitHub Pages deploys from `web/` via a new `.github/workflows/pages.yml` workflow (switched from legacy `main/` to GitHub Actions deployment).
+- **AGENTS.md** + README updated for the new layout and install paths.
+- **html-tool-patterns skill** LOC threshold raised: warn 600, stop 1100 (was 900). Empirical-observations table added to document realistic ceilings for tool variants (renderer ~770, host-bridge ~190, inspector ~1010).
+- 0.0.6's wrapped-demo `?demo=wrapped` JS path stays in `web/index.html` — the inspector's Pyodide-driven live render is the production path; the inline-JS wrap is the lightweight no-deps fallback for users who don't want the inspector's 10MB Pyodide download.
+
+### Architecture
+- nexus does **not** depend on palinex. The dependency direction is strictly palinex → nexus (and only via the `[nexus]` extra).
+- The HTTP sidecar that was briefly scoped is dropped per RDR-002. Pyodide-based pages (inspector.html) cover the non-Claude-Code use cases.
+- A separate playground page is NOT shipped — inspector.html serves both debugging and live-render.
+
+### Companion in nexus
+- nexus RDR-127 v2 (in PR #926) records the corresponding non-decision: nexus ships no surface-rendering code. RDR-123 and RDR-124 remain superseded by RDR-127, with tombstones refreshed to point at the palinex plugin layer.
+
 ## [0.0.6] — 2026-05-22
 
 Wrapped-demo variant in the standalone renderer.
