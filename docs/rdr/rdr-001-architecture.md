@@ -300,7 +300,7 @@ All four followed the dispatch pattern established by the original 14. `BASIC_CO
 
 ### Phase 3: Action registry hardening
 
-- [ ] Document the postMessage RPC protocol as a stable contract (separate spec doc)
+- [x] Document the postMessage RPC protocol as a stable contract (separate spec doc) — `docs/protocols/postmessage-rpc.md` + conformance test `tests/test_protocol_spec.py`
 - [ ] Add `runSkill` (nexus-specific) to the host-bridge example
 - [ ] Add `openFile` (editor-host-specific) to the host-bridge example
 - [ ] Define trust-gate signature: how a host decides which actions a given producer may emit

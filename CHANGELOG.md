@@ -4,6 +4,13 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+### Added
+- **`docs/protocols/postmessage-rpc.md`** — normative specification of the postMessage RPC protocol used between the a2ui surface renderer and host bridges. Stabilises the wire contract previously described only in RDR-001 §Item 6 prose so a third-party host bridge (Tauri shell, custom MCP UI host, HTTP sidecar) can be implemented from the spec alone. Covers envelope shapes (`a2ui.ready` / `a2ui.load` / `a2ui.message` / `a2ui.config` / `a2ui.request` / `a2ui.response` / `a2ui.action`), method dispatch + allowlist semantics, the 10 s renderer-side timeout, retry-until-ack handshake (150 ms × 40 attempts ≈ 6 s budget), configuration push via `localStorage`, and a versioning policy (handshake-driven, MAJOR.MINOR, absence == 1.0 inference rule, MAJOR-mismatch normative behaviour). Protocol declared at v1.0; the v0.2.x→0.3.0 wire shape is unchanged. RDR-001 Phase 3 Item 1.
+- **`tests/test_protocol_spec.py`** (26 conformance checks) — asserts that `web/index.html` and `web/host-bridge.html` continue to match the wire shape, method names, timeout constant, and retry budget declared by the spec. Catches silent drift between spec and reference implementations on every CI run.
+
+### Changed
+- **RDR-001 Phase 3** — Item 1 ("Document the postMessage RPC protocol as a stable contract") checked off, with the spec doc and conformance test as deliverables.
+
 ## [0.3.0] — 2026-05-23
 
 Hardening release. Sweeps up the host-bridge and bundle work that shipped on main between 0.2.0 and now, plus the marketplace conversion to a pinned-source release model so future main commits don't surprise installed users. RDR-001 and RDR-003 both formally accepted in this cycle.
