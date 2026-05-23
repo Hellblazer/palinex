@@ -4,6 +4,13 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-05-23
+
+Bug-fix patch plus release-tooling automation. Two changes:
+
+- **Fix**: `updateDataModel.patch` shape was silently bypassed by the chash resolver walker (only `value` was enumerated). Producers using sparse data-model updates with chash references now get them resolved through `wrap_as_mcp_ui_resource` like value-shaped payloads do (palinex-e7z).
+- **CI**: `.github/workflows/release.yml` now builds the `.mcpb` Claude Desktop extension bundle automatically on every `v*` tag push and attaches it to the GitHub Release alongside the wheel + sdist (palinex-hg3). v0.4.2 is the first release exercising this workflow.
+
 ### Added
 - **`.github/workflows/release.yml` now builds and attaches the `.mcpb` Claude Desktop extension bundle** on every `v*` tag push, closing the gap RDR-003 §Item 3a flagged (`mcpb pack mcpb /tmp/palinex-<version>.mcpb` via `@anthropic-ai/mcpb`, plus an `mcpb/manifest.json` version-vs-tag parity check that fails loud on drift). Inlined into the existing release workflow rather than a separate `release-mcpb.yml` — single release job prevents two workflows racing on the GitHub Release creation step. Future tags will see `palinex-<version>.mcpb` as a downloadable asset alongside the wheel and sdist. (palinex-hg3)
 
