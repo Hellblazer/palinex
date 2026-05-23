@@ -349,3 +349,181 @@ def test_python_and_js_required_fields_match(trust_gate_js: str) -> None:
     assert js_fields == _REQUIRED_TRUST_FIELDS, (
         f"Python required={_REQUIRED_TRUST_FIELDS} ≠ JS required={js_fields}"
     )
+
+
+# ---------------------------------------------------------------------------
+# valid_until enforcement (Reviewer Finding #2 + #7 — missing-test gap)
+# ---------------------------------------------------------------------------
+
+
+def _bridge_lookup(trust_store: dict, producer_id: str) -> list | None:
+    """Pure-Python mirror of host-bridge.html's trustStoreAllowedActions.
+
+    Lets us test the valid_until enforcement path without a browser. The
+    JS-source conformance tests assert the JS code has the matching check.
+    """
+    entry = trust_store.get("keys", {}).get(producer_id)
+    if not entry:
+        return None
+    valid_until = entry.get("valid_until")
+    if valid_until:
+        try:
+            expires = datetime.fromisoformat(valid_until.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            expires = None
+        if expires is not None and expires < datetime.now(timezone.utc):
+            return None
+    return entry.get("allowed_actions")
+
+
+def test_valid_until_in_future_allows_lookup(nexus_key: SigningKey) -> None:
+    """Reviewer Finding #2: valid_until in the future → producer is trusted."""
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    store = {
+        "keys": {
+            nexus_key.producer_id: {
+                "publicKey": nexus_key.public_key_b64u,
+                "allowed_actions": ["runSkill", "openChash"],
+                "valid_until": future.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        },
+        "default_policy": "log-only",
+    }
+    assert _bridge_lookup(store, nexus_key.producer_id) == ["runSkill", "openChash"]
+
+
+def test_valid_until_in_past_denies_lookup(nexus_key: SigningKey) -> None:
+    """Reviewer Finding #2: valid_until in the past → producer must be treated as unknown."""
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    store = {
+        "keys": {
+            nexus_key.producer_id: {
+                "publicKey": nexus_key.public_key_b64u,
+                "allowed_actions": ["runSkill", "openChash"],
+                "valid_until": past.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        },
+        "default_policy": "log-only",
+    }
+    assert _bridge_lookup(store, nexus_key.producer_id) is None, \
+        "key past valid_until must be treated as not-in-store"
+
+
+def test_valid_until_absent_allows_indefinite(nexus_key: SigningKey) -> None:
+    """No valid_until field → key has no expiry (intended use for the active key)."""
+    store = {
+        "keys": {
+            nexus_key.producer_id: {
+                "publicKey": nexus_key.public_key_b64u,
+                "allowed_actions": ["runSkill"],
+                # no valid_until
+            },
+        },
+    }
+    assert _bridge_lookup(store, nexus_key.producer_id) == ["runSkill"]
+
+
+def test_host_bridge_js_enforces_valid_until() -> None:
+    """Reviewer Finding #2: web/host-bridge.html source must contain the valid_until check."""
+    bridge_js = HOST_BRIDGE_HTML.read_text(encoding="utf-8")
+    assert "valid_until" in bridge_js, \
+        "host-bridge.html trustStoreAllowedActions MUST check entry.valid_until"
+    assert re.search(
+        r"entry\.valid_until.*Date\.parse|Date\.parse\(entry\.valid_until\)",
+        bridge_js,
+        re.S,
+    ), "valid_until must be parsed and compared against Date.now()"
+
+
+# ---------------------------------------------------------------------------
+# Reviewer Finding #1: signed-but-unknown-producer must be denied
+# ---------------------------------------------------------------------------
+
+
+def test_host_bridge_denies_signed_unknown_producer() -> None:
+    """Reviewer Finding #1: handleRequest MUST deny when verifiedTrust set
+    AND verifiedActions === null, regardless of default_policy (except 'allow')."""
+    bridge_js = HOST_BRIDGE_HTML.read_text(encoding="utf-8")
+    # The third gate branch must exist: verifiedTrust && verifiedActions === null
+    assert re.search(
+        r"verifiedTrust\s*&&\s*verifiedActions\s*===\s*null",
+        bridge_js,
+    ), "host-bridge.html must have a branch for signed-but-unknown-producer payloads"
+    # And policy === 'allow' is the only escape hatch
+    assert "policy !== 'allow'" in bridge_js, \
+        "host-bridge.html must let policy='allow' bypass the unknown-producer branch"
+
+
+def test_host_bridge_denies_unsigned_log_only_bridge_methods() -> None:
+    """RDR-004 §Item 7: log-only mode MUST deny bridge-routed methods for unsigned payloads."""
+    bridge_js = HOST_BRIDGE_HTML.read_text(encoding="utf-8")
+    # The log-only branch for unsigned payloads must exist and deny
+    assert re.search(
+        r"verifiedTrust\s*===\s*null\s*&&\s*policy\s*===\s*'log-only'",
+        bridge_js,
+    ), "host-bridge.html must have a deny branch for unsigned + log-only policy"
+
+
+# ---------------------------------------------------------------------------
+# Reviewer Finding #9: byte-level JCS cross-impl check
+# ---------------------------------------------------------------------------
+
+
+def test_jcs_canonicalization_byte_stable() -> None:
+    """Reviewer Finding #9: assert rfc8785 produces the exact canonical bytes
+    we expect for known fixture payloads. If the rfc8785 package's number
+    serialisation drifts from String(n) in JS, this test catches it before
+    the JS verifier silently rejects Python-signed payloads in production.
+    """
+    import rfc8785
+
+    # Object with mixed types, including integer-shaped floats.
+    payload = {
+        "version": "v0.9",
+        "n_int": 42,
+        "n_float_int": 1.0,
+        "n_float": 1.5,
+        "b": True,
+        "s": "hello",
+        "nested": {"z": 1, "a": 2},  # key reordering test
+        "arr": [1, "two", False, None],
+    }
+    canonical = rfc8785.dumps(payload).decode("utf-8")
+    # Keys sorted alphabetically at every level.
+    expected = (
+        '{"arr":[1,"two",false,null],'
+        '"b":true,'
+        '"n_float":1.5,'
+        '"n_float_int":1,'   # JCS / ECMAScript: 1.0 → "1"
+        '"n_int":42,'
+        '"nested":{"a":2,"z":1},'
+        '"s":"hello",'
+        '"version":"v0.9"}'
+    )
+    assert canonical == expected, (
+        f"rfc8785 canonical bytes drifted from expected ECMAScript number "
+        f"formatting:\n  got:      {canonical}\n  expected: {expected}"
+    )
+
+
+def test_jcs_canonicalization_unicode_stable() -> None:
+    """JCS preserves Unicode code points (no NFC/NFD normalization)."""
+    import rfc8785
+
+    # 'café' as NFC (single 'é' char) vs NFD (e + combining acute) must stay distinct.
+    nfc = "café"          # 4 chars, é = U+00E9
+    nfd = "café"    # 5 chars, e + combining acute U+0301
+    assert nfc != nfd, "Test premise: NFC and NFD strings differ"
+
+    canon_nfc = rfc8785.dumps({"name": nfc}).decode("utf-8")
+    canon_nfd = rfc8785.dumps({"name": nfd}).decode("utf-8")
+    assert canon_nfc != canon_nfd, "JCS MUST preserve Unicode form (no normalization)"
+
+    # Round-trip through sign/verify to confirm the Python verifier honours this.
+    key = SigningKey.from_seed(b"\x77" * 32)
+    signed_nfc = sign_payload({"version": "v0.9", "name": nfc}, key, actions=["openUrl"])
+    signed_nfd = sign_payload({"version": "v0.9", "name": nfd}, key, actions=["openUrl"])
+    verify_payload(signed_nfc)
+    verify_payload(signed_nfd)
+    # Signatures differ because canonical bytes differ.
+    assert signed_nfc["trust"]["signature"] != signed_nfd["trust"]["signature"]

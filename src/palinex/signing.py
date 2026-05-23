@@ -146,12 +146,28 @@ def _reject_non_finite_floats(obj: Any, path: str = "<root>") -> None:
     serialise these as ``null``, which would land in the verifier's parsed
     payload as a different value than the producer thought it signed.
     Failing closed here removes the ambiguity.
+
+    Also rejects non-string dict keys: JSON requires keys to be strings, but
+    Python ``dict`` accepts anything hashable. Passing a non-string key to
+    ``rfc8785.dumps`` would land as a ``TypeError`` deep inside the canonicalizer
+    instead of a friendly :class:`MalformedTrustError` here.
     """
+    if isinstance(obj, bool):
+        # bool is an int subclass; serialises as true/false in both Python json
+        # and JCS. Handle before the float branch so True/False isn't probed
+        # against NaN checks (NaN check on a bool would be False anyway, but
+        # the explicit branch documents the decision).
+        return
     if isinstance(obj, float):
         if obj != obj or obj == float("inf") or obj == float("-inf"):
             raise MalformedTrustError(f"non-finite float at {path}: {obj!r}")
     elif isinstance(obj, dict):
         for k, v in obj.items():
+            if not isinstance(k, str):
+                raise MalformedTrustError(
+                    f"dict key at {path} must be a string for JCS canonicalization: "
+                    f"got {type(k).__name__} {k!r}"
+                )
             _reject_non_finite_floats(v, f"{path}.{k}")
     elif isinstance(obj, (list, tuple)):
         for i, v in enumerate(obj):

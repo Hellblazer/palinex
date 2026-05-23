@@ -175,6 +175,42 @@ def test_sign_payload_rejects_non_finite_floats(bad_value: float) -> None:
         sign_payload(payload, key, actions=["openUrl"])
 
 
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        # Reviewer Finding #8: NaN inside nested list at depth > 1.
+        ("data", "deep", [[float("nan")]]),
+        ("data", "list_of_dicts", [{"nested_nan": float("nan")}]),
+        ("data", "deep_nest", {"a": {"b": {"c": [float("inf")]}}}),
+    ],
+)
+def test_sign_payload_rejects_non_finite_at_depth(bad_path) -> None:
+    """Reviewer Finding #8: non-finite floats inside nested lists must be caught."""
+    key = SigningKey.generate()
+    payload = _basic_payload()
+    payload[bad_path[0]] = {bad_path[1]: bad_path[2]}
+    with pytest.raises(MalformedTrustError, match=r"non-finite"):
+        sign_payload(payload, key, actions=["openUrl"])
+
+
+def test_sign_payload_rejects_non_string_dict_keys() -> None:
+    """Reviewer Finding #4a: dict keys must be strings (JSON / JCS requirement)."""
+    key = SigningKey.generate()
+    payload = _basic_payload()
+    payload["data"] = {42: "value"}  # int key — illegal in JSON
+    with pytest.raises(MalformedTrustError, match=r"must be a string"):
+        sign_payload(payload, key, actions=["openUrl"])
+
+
+def test_sign_payload_accepts_bool_values() -> None:
+    """bool is int subclass; serialises as true/false. Walker MUST NOT reject."""
+    key = SigningKey.generate()
+    payload = _basic_payload()
+    payload["data"] = {"flag_on": True, "flag_off": False, "values": [True, False]}
+    signed = sign_payload(payload, key, actions=["openUrl"])
+    verify_payload(signed)  # round-trip with bools — must not error
+
+
 def test_sign_payload_rejects_short_nonce() -> None:
     key = SigningKey.generate()
     with pytest.raises(ValueError, match="16 bytes"):

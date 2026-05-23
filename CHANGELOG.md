@@ -35,6 +35,18 @@ Tests:
 
 Deferred to follow-up bead (palinex-rl0): renderer-side MUST-verify rule from RDR-004 §Item 4. `web/index.html` is at 857 LOC against a 900 hard ceiling; adding Web Crypto Ed25519 + JCS inline would push past it. The bridge-side check is the security-critical path; renderer-side is defense-in-depth for renderer-local actions.
 
+### Fixed (post-merge code-review findings on RDR-004 Phase 4b)
+
+A code-review-expert pass on the just-merged trust-gate work surfaced two critical bugs and three important issues. All addressed in one follow-up commit (palinex-fjh):
+
+- **Critical: `handleRequest` logic gap for signed-but-unknown-producer payloads.** Previous code only checked `verifiedTrust && verifiedActions !== null` (known producer) and `verifiedTrust === null && policy === 'deny'` (unsigned + deny). When `verifiedTrust` was non-null AND `verifiedActions` was null (valid signature, producer not in trust store), neither branch fired and the backend ran unfiltered — defeating RDR-004 §Item 5's commitment that unknown-producer bridge-routed methods are denied under `log-only`. Added the missing branches: signed-unknown-producer denies under any policy except `'allow'`; unsigned + log-only denies bridge-routed methods explicitly.
+- **Critical: trust-store `valid_until` field was never enforced.** `trustStoreAllowedActions` ignored `entry.valid_until` entirely. A rotated-out key remained trusted indefinitely, breaking RDR-004 §Item 6's "Producer key rotated out" failure mode. Added a `Date.parse(entry.valid_until) < Date.now()` check that returns `null` (treated as unknown producer) when the key has expired.
+- **Important: `b64uEncode` used `btoa(String.fromCharCode(...bytes))`.** The spread operator on a `Uint8Array` of 64+ KB crashes V8/SpiderMonkey with `RangeError: Maximum call stack size exceeded`. Current callers pass 32/64 bytes (safe), but `b64uEncode` is exported on `window.a2uiTrustGate` as a reusable primitive. Replaced with a loop in both `web/trust-gate.html` and `web/host-bridge.html`.
+- **Important: `_reject_non_finite_floats` didn't check dict keys.** Python `dict` accepts non-string hashables (including `float("nan")`) as keys, but JSON / JCS require string keys. A NaN key would silently pass the producer-side guard and surface as a `TypeError` deep inside `rfc8785.dumps` rather than a friendly `MalformedTrustError`. Added an `isinstance(k, str)` check and a `bool`-isn't-float early-return for clarity (Python's `True == 1.0` quirk).
+- **Minor: dead expression `logLine('warn' in {} ? 'err' : 'req', ...)`.** Always evaluated to `'req'`. Replaced with `'err'` for unknown-producer warnings.
+
+13 new tests in `tests/test_signing.py` and `tests/test_trust_gate.py` cover: nested non-finite floats at depth > 1, list-of-dict non-finite, non-string dict keys, `bool` round-trip, three `valid_until` cases (future/past/absent), source-regex assertions on both new bridge gate branches, byte-level JCS canonicalization stability (number formatting `1.0 → "1"`, key sort order), and Unicode NFC/NFD preservation (no normalization).
+
 ## [0.3.0] — 2026-05-23
 
 Hardening release. Sweeps up the host-bridge and bundle work that shipped on main between 0.2.0 and now, plus the marketplace conversion to a pinned-source release model so future main commits don't surprise installed users. RDR-001 and RDR-003 both formally accepted in this cycle.
