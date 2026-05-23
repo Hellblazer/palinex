@@ -1,0 +1,9 @@
+{
+  "palinex": {
+    "command": "palinex-mcp",
+    "args": [],
+    "env": {
+      "CLAUDE_PLUGIN_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+    }
+  }
+}

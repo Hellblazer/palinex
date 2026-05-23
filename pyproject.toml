@@ -50,6 +50,12 @@ Repository = "https://github.com/Hellblazer/palinex"
 Renderer = "https://hellblazer.github.io/palinex/"
 Issues = "https://github.com/Hellblazer/palinex/issues"
 
+[project.scripts]
+# `palinex-mcp` runs the FastMCP server over stdio. The Claude Code plugin's
+# .mcp.json references this name directly; users install palinex (with the
+# [mcp] extra) and the script lands on $PATH.
+palinex-mcp = "palinex.mcp.server:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/palinex"]
 
