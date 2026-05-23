@@ -747,6 +747,11 @@ window.addEventListener('message', (e) => {
   }
 });
 
+if (window.parent && window.parent !== window) {
+  try { window.parent.postMessage({type: 'a2ui.ready'}, '*'); }
+  catch (e) { /* parent unreachable; wrapper will fall back to retries */ }
+}
+
 document.getElementById('btn-load').addEventListener('click', () => document.getElementById('file-in').click());
 document.getElementById('btn-load-empty')?.addEventListener('click', () => document.getElementById('file-in').click());
 document.getElementById('file-in').addEventListener('change', async (e) => {
