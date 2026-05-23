@@ -70,6 +70,42 @@ jobs:
       - name: Build wheel and sdist
         run: uv build --sdist --wheel
 
+      - name: Verify mcpb/manifest.json version matches tag (palinex-hg3)
+        # Parity check — without this guard a mismatched mcpb manifest would
+        # ship an internally inconsistent bundle. Fail loud on drift.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MCPB=$(python3 -c '
+          import json
+          print(json.load(open("mcpb/manifest.json")).get("version", ""))
+          ')
+          if [ "$TAG" != "$MCPB" ]; then
+            echo "ERROR: tag '$TAG' does not match mcpb/manifest.json version '$MCPB'"
+            exit 1
+          fi
+          echo "mcpb manifest version check passed: $MCPB"
+
+      - name: Set up Node.js for @anthropic-ai/mcpb (palinex-hg3)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build .mcpb bundle (palinex-hg3)
+        # palinex ships as a Claude Desktop extension alongside the PyPI
+        # package. The .mcpb is a versioned zip carrying manifest.json +
+        # pyproject.toml + src/server.py from mcpb/. `npx @anthropic-ai/mcpb`
+        # validates manifest.json against the v0.4 schema before zipping.
+        # The bundle lives in /tmp so the dist/ directory stays Python-only
+        # for the PyPI publish step (which rejects non-Python file types).
+        # RDR-003 §Item 3a flagged the lack of automated build; this closes
+        # palinex-hg3.
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          BUNDLE="palinex-${TAG}.mcpb"
+          npm install -g @anthropic-ai/mcpb
+          mcpb pack mcpb "/tmp/${BUNDLE}"
+          ls -la "/tmp/${BUNDLE}"
+
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         # OIDC trusted publisher — no API token required.
@@ -81,4 +117,5 @@ jobs:
           files: |
             dist/*.whl
             dist/*.tar.gz
+            /tmp/palinex-*.mcpb
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') }}
