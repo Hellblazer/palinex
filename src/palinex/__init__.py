@@ -712,8 +712,20 @@ _MCP_UI_TEMPLATE = """<!DOCTYPE html>
       try {{ frame.contentWindow.postMessage({{type: 'a2ui.load', payload}}, '*'); }}
       catch (e) {{ console.error('[palinex-mcp-ui]', e); }}
     }}
-    if (frame.contentDocument && frame.contentDocument.readyState === 'complete') deliver();
-    else frame.addEventListener('load', deliver);
+    let acked = false;
+    window.addEventListener('message', (e) => {{
+      if (e.source === frame.contentWindow && e.data && e.data.type === 'a2ui.ready') {{
+        acked = true;
+        deliver();
+      }}
+    }});
+    frame.addEventListener('load', deliver);
+    let attempts = 0;
+    const timer = setInterval(() => {{
+      if (acked) {{ clearInterval(timer); return; }}
+      deliver();
+      if (++attempts >= 40) clearInterval(timer);
+    }}, 150);
   }})();
 </script>
 </body>
