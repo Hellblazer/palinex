@@ -504,7 +504,13 @@ function handleFunctionCall(fn, sourceId) {
       hostBridge('openChash', { chash: args.chash, sourceId });
       break;
     default:
-      hostBridge('functionCall', { call: fn.call, args, sourceId });
+      // RDR-001 §Item 7: "All other actions go through the same postMessage
+      // path with method set to the action name." Critical for RDR-004's
+      // trust gate to intersect on method names — the previous implementation
+      // wrapped extension methods as method:'functionCall' with the real name
+      // buried in params.call, which the trust gate could not enforce against
+      // the producer's trust.actions list. (palinex-lc9, live-shakeout finding)
+      hostBridge(fn.call, { ...args, sourceId });
   }
 }
 
