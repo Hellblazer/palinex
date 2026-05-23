@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "palinex",
+  "project_id": "12802c4a-a51c-4738-bc18-3b485dfbdff8"
+}
