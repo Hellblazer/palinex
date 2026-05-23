@@ -1,0 +1,34 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "palinex",
+  "display_name": "Palinex",
+  "version": "0.1.0",
+  "description": "Render a2ui v0.9 surfaces inline in Claude Desktop as sandboxed iframes.",
+  "long_description": "Palinex wraps a2ui v0.9 surface payloads as MCP UI resources so Claude Desktop renders them inline. Exposes a single tool, render_surface, that takes a surface payload and returns a ui:// resource pointing at the palinex renderer. Optional nexus integration resolves chash references in the payload against nexus T3 when conexus is also installed.",
+  "author": {
+    "name": "Hal Hildebrand",
+    "url": "https://github.com/Hellblazer"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hellblazer/palinex"
+  },
+  "homepage": "https://github.com/Hellblazer/palinex",
+  "license": "Apache-2.0",
+  "keywords": ["a2ui", "ui", "rendering", "surface", "mcp-ui", "claude"],
+  "server": {
+    "type": "uv",
+    "entry_point": "src/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "src/server.py"]
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.12"
+    }
+  }
+}
