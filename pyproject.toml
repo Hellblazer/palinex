@@ -42,7 +42,7 @@ mcp = ["mcp>=1.0"]
 all = ["palinex[validate,nexus,mcp]"]
 
 [dependency-groups]
-dev = ["pytest>=8", "jsonschema>=4"]
+dev = ["pytest>=8", "jsonschema>=4", "mcp>=1.0"]
 
 [project.urls]
 Homepage = "https://github.com/Hellblazer/palinex"
