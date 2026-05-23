@@ -28,6 +28,18 @@ classifiers = [
 
 [project.optional-dependencies]
 validate = ["jsonschema>=4"]
+# [nexus] enables the nexus integration shim (chash resolver, HTTP sidecar's
+# nexus-backed endpoints). nexus ships on PyPI as `conexus`; the import name
+# is `nexus`. Pinned >=4.34 because that's where the catalog + T3 APIs we
+# use have settled.
+nexus = ["conexus>=4.34"]
+# [mcp] enables the FastMCP server entry point (python -m palinex.mcp). The
+# server itself is small (~80 LOC); fastmcp is the runtime dep that does the
+# heavy lifting.
+mcp = ["mcp>=1.0"]
+# [all] is the kitchen-sink install — most users wanting the full plugin +
+# sidecar experience pick this.
+all = ["palinex[validate,nexus,mcp]"]
 
 [dependency-groups]
 dev = ["pytest>=8", "jsonschema>=4"]
