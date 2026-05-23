@@ -1,14 +1,15 @@
 ---
-title: "Packaging: Claude Code Plugin + nexus-front-end Role + src/ Layout"
+title: "Packaging: Claude Code Plugin + Claude Desktop .mcpb Bundle + nexus-front-end Role + src/ Layout"
 id: RDR-003
 type: Architecture
-status: draft
+status: accepted
 priority: high
 author: Hal Hildebrand
 reviewed-by: self
 created: 2026-05-22
+accepted_date: 2026-05-23
 related_rdrs: [RDR-001, RDR-002]
-related_external: [a2ui-v0.9-spec, claude-code-plugins, fastmcp]
+related_external: [a2ui-v0.9-spec, claude-code-plugins, claude-desktop-mcpb, fastmcp]
 ---
 
 # RDR-003: Packaging — Claude Code Plugin + nexus-front-end Role + src/ Layout
@@ -89,7 +90,7 @@ Tests find the package via `[tool.pytest.ini_options] pythonpath = ["src"]`,
 not via PYTHONPATH=. or editable install. Pages deploys from `web/` via a
 GitHub Actions workflow.
 
-**Item 3 — Distribution channels.** palinex ships through three channels:
+**Item 3 — Distribution channels.** palinex ships through eight channels (five PyPI extras plus three host-facing distributions):
 
 | Channel | Install | Contents |
 |---|---|---|
@@ -99,10 +100,53 @@ GitHub Actions workflow.
 | PyPI `palinex[nexus]` | `pip install palinex[nexus]` | + conexus dep |
 | PyPI `palinex[all]` | `pip install palinex[all]` | All extras combined |
 | Claude Code plugin | `/plugin install Hellblazer/palinex` (or local path) | The `plugin/` subtree |
+| Claude Desktop `.mcpb` extension | Drag bundle into Claude Desktop → Settings → Developer → Install extension | The `mcpb/` subtree (see Item 3a) |
 | GitHub Pages | `https://hellblazer.github.io/palinex/` | `web/` deployed via `.github/workflows/pages.yml` |
 
 Console script: `palinex-mcp` (from `[project.scripts]`) starts the FastMCP
-server. The plugin's `.mcp.json` references it by name.
+server. The plugin's `.mcp.json` references it by name. The `.mcpb` bundle's
+`manifest.json` invokes `src/server.py` via `uv run --directory ${__dirname}`,
+where `src/server.py` is a thin entry point that delegates to the same
+`palinex.mcp.server.main()` function — behaviorally equivalent to the console
+script, just dispatched differently because Claude Desktop's extension runner
+expects a script path rather than a script name.
+
+**Item 3a — Claude Desktop `.mcpb` bundle.** Added in 0.2.0 (commit `fe03232`).
+The bundle vendors a uv-managed `.venv` that pulls `palinex[mcp]>=<version>`
+from PyPI and exposes the same `render_surface` MCP tool as the Claude Code
+plugin. Bundle layout:
+
+```
+mcpb/
+├── .gitignore       ignores .venv/, uv.lock, *.mcpb, __pycache__/
+├── .mcpbignore      excludes dev artifacts from the built archive
+├── manifest.json    Claude Desktop extension manifest (v0.4 schema)
+├── pyproject.toml   palinex-mcpb wrapper package; depends on palinex[mcp]
+├── src/server.py    thin entry point: `from palinex.mcp.server import main; main()`
+└── uv.lock          pinned dep tree resolved at build time
+```
+
+Built `.mcpb` archives (`palinex-<version>.mcpb`) and the local `.venv/` are
+gitignored — they're build/runtime artifacts, not source. Build output lands
+in `mcpb/palinex-<version>.mcpb` and is distributed out-of-band.
+
+The bundle is built externally (mcpb CLI or equivalent) and distributed as a
+`.mcpb` archive. Versioning: `mcpb/pyproject.toml` version and
+`mcpb/manifest.json` version both track `palinex` semver — bump together.
+
+**Known limitation as of 0.2.0 (Claude Code Desktop v2.1.149):** the host
+does not currently render `ui://` HTML resources as inline iframes (per
+RDR-001 §Context A1). The bundle therefore provides the MCP server only;
+inline visible surfaces require a host that mounts `ui://` resources, or
+fall back to the embedded-artifact / external-URL delivery shapes from
+RDR-001 Item 4. The bundle's `manifest.json` description reflects this
+honestly; see RDR-001 §Item 9 for the cross-reference.
+
+There is currently no automated release workflow for the `.mcpb` bundle
+(unlike PyPI publishing which is OIDC-trusted-publisher tag-triggered).
+Tracked as bead `palinex-hg3`: add a `release-mcpb.yml` workflow that
+builds the bundle on `v*` tag push and attaches the `.mcpb` archive as
+a GitHub release asset.
 
 **Item 4 — No HTTP sidecar.** Briefly scoped as `src/palinex/server/`,
 dropped per RDR-002 (Pyodide-as-default). The use cases the sidecar would
@@ -119,11 +163,16 @@ A future RDR can revisit if a real "Python HTTP service fronting nexus"
 demand surfaces. RDR-003 explicitly forecloses building it speculatively.
 
 **Item 5 — Versioning policy update.** palinex 0.x.y tracks a2ui v0.9.
-The 0.0.x → 0.1.0 bump reflects the substantial restructure (src/ layout,
-plugin shipped, nexus integration). 0.1.x continues to track a2ui v0.9.
-0.2.x lands if/when something substantial happens (interactive flows,
-new component category, etc.); 1.0.0 is reserved for a2ui v1.0 if/when
-that ships upstream.
+Bump history under this policy:
+
+- **0.0.x → 0.1.0** — substantial restructure (src/ layout, plugin shipped, nexus integration)
+- **0.1.0 → 0.2.0** (shipped 2026-05-23) — about:blank race fix in the wrapper bootstrap with the retry-until-ack handshake (RDR-001 §Item 6 amendment), Phase 2 Basic Catalog components (Tabs / DateTimeInput / Video / AudioPlayer), and the new `.mcpb` Claude Desktop bundle (Item 3a)
+
+Forward-looking: 0.2.x patches for the same scope; 0.3.0 lands when Phase 3
+(RDR-001 action registry hardening — protocol doc, runSkill, openFile,
+trust-gate) ships incrementally per the bead chain `palinex-ytv`,
+`palinex-i10`, `palinex-xwr`, `palinex-pr1`. 1.0.0 remains reserved for a2ui
+v1.0 if/when that ships upstream.
 
 **Item 6 — palinex.nexus_bridge is the only nexus-aware module.** All
 nexus access in palinex routes through `palinex.nexus_bridge`. This keeps
@@ -276,3 +325,18 @@ _2026-05-22 — initial sketch. Captures the packaging decisions made during
 the same session that wrote and reversed the nexus-side integration
 (RDR-127 v1 → v2). HTTP sidecar dropped per RDR-002. Inspector subsumes
 playground. Source layout codified._
+
+_2026-05-23 — accepted alongside palinex 0.2.0. Amendments before acceptance:_
+- _Title extended to include "Claude Desktop .mcpb Bundle" — the bundle was a real packaging path that landed in 0.2.0 (commit fe03232) but the original title and Item 3 didn't mention it._
+- _Item 3 distribution table extended from three channels to four (added `.mcpb` row); console-script note clarified that both the plugin's `.mcp.json` and the bundle's `manifest.json` reference the same `palinex-mcp` entry point._
+- _Item 3a "Claude Desktop .mcpb bundle" added — covers the `mcpb/` directory layout, the uv-managed `.venv` that pulls `palinex[mcp]` from PyPI, version-bump coupling between `mcpb/pyproject.toml` and `mcpb/manifest.json` and root `pyproject.toml`, the Claude Code Desktop v2.1.149 inline-rendering limitation (cross-references RDR-001 §Context A1), and the gap around .mcpb release automation (no workflow exists yet — flagged as future work)._
+- _`related_external` extended with `claude-desktop-mcpb`._
+
+_Status flipped from draft to accepted. T2 records under palinex_rdr/003 and palinex_rdr/003-gate-latest mirror the file state. Phase 2 items (plugin marketplace listing, interactive flows, additional resolvers, per-host catalogs) remain out of scope for the accepted architecture._
+
+_Second-pass corrections from substantive-critic gate (after the initial amendments above):_
+- _Item 3 prose corrected from "four channels" to "eight channels" — the count was stale after the table was extended._
+- _Item 3a layout diagram extended to mention `.gitignore` and `.mcpbignore`; added explicit note that built `.mcpb` archives and the `.venv/` are gitignored (so the local `mcpb/palinex-<version>.mcpb` artifact a developer sees after a build isn't a tracked file)._
+- _Item 3 console-script paragraph corrected: the `.mcpb` bundle's `manifest.json` invokes `src/server.py` directly via `uv run --directory ${__dirname} src/server.py`, not the `palinex-mcp` console script. The behavior is equivalent (`src/server.py` delegates to `palinex.mcp.server.main()`) but the dispatch path is different._
+- _Item 5 versioning policy rewritten — it had still framed 0.2.x as hypothetical when palinex 0.2.0 had already shipped today. New text records the 0.0.x → 0.1.0 → 0.2.0 bump history and points the forward-looking 0.3.0 line at the RDR-001 Phase 3 bead chain._
+- _Item 3a release-automation gap upgraded from "future ticket should" to a tracked bead (`palinex-hg3`, P2)._
