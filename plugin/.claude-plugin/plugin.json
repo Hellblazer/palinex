@@ -1,6 +1,6 @@
 {
   "name": "palinex",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Render a2ui v0.9 surfaces inline in Claude Code chat. Wraps payloads via palinex.wrap_as_mcp_ui_resource and returns them as MCP UI resources Claude Code renders as sandboxed iframes. Optional nexus integration substitutes chash references with chunk text at wrap time.",
   "author": {
     "name": "Hal Hildebrand",
