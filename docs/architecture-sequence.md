@@ -57,10 +57,10 @@ sequenceDiagram
     loop for each string in data model
         Palinex->>Bridge: 6. chash_resolver(candidate)<br/>(callable, in-process)
         alt 32-char lowercase hex
-            Bridge->>T3: 7. t3.get_by_id(collection, chash)<br/>(via nexus.mcp_infra.get_t3)
+            Bridge->>T3: 7. t3.get_by_id(collection, chash)
             T3-->>Bridge: 8. chunk content or None
         else not chash-shaped
-            Bridge-->>Palinex: (skip; return None)
+            Bridge-->>Palinex: (skip — returns None)
         end
         Bridge-->>Palinex: 9. resolved text or None
     end
