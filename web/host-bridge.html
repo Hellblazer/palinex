@@ -104,7 +104,12 @@ const cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
 const TG_ALGORITHM = 'Ed25519';
 const TG_REQUIRED = ['producerId','publicKey','algorithm','actions','issuedAt','expiresAt','nonce','signature'];
 const TG_SKEW_MS = 60_000;
-function tgB64uEnc(bytes) { return btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
+function tgB64uEnc(bytes) {
+  // Loop instead of spread — spread of Uint8Array crashes engines at ~65k elements.
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
 function tgB64uDec(s) {
   s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '=';
   const bin = atob(s); const out = new Uint8Array(bin.length);
@@ -185,7 +190,16 @@ function loadTrustStore() {
 }
 function trustStoreAllowedActions(store, producerId) {
   const entry = store?.keys?.[producerId];
-  return entry?.allowed_actions || null;
+  if (!entry) return null;
+  // RDR-004 §Item 5 / §Item 6: a key past its valid_until is rotated out.
+  // Treat as unknown — falls through to default_policy.
+  if (entry.valid_until) {
+    const expiresMs = Date.parse(entry.valid_until);
+    if (!Number.isNaN(expiresMs) && expiresMs < Date.now()) {
+      return null;
+    }
+  }
+  return entry.allowed_actions || null;
 }
 function trustStoreDefaultPolicy(store) {
   return store?.default_policy || 'log-only';
@@ -202,8 +216,7 @@ async function trustGateCheck(payload) {
   const storeActions = trustStoreAllowedActions(store, trust.producerId);
   if (storeActions === null) {
     const policy = trustStoreDefaultPolicy(store);
-    logLine('warn' in {} ? 'err' : 'req',
-      `trust: unknown producer ${trust.producerId.slice(0,12)}… (default_policy=${policy})`);
+    logLine('err', `trust: unknown producer ${trust.producerId.slice(0,12)}… (default_policy=${policy})`);
     return { verified: trust, allowedActions: null, policy };
   }
   if (!replayCache.checkAndRecord(trust.producerId, trust.nonce, trust.expiresAt)) {
@@ -298,11 +311,23 @@ async function handleRequest(m) {
   const { backend, label } = getBackend();
   logLine('req', `→ ${m.method} ${JSON.stringify(m.params).slice(0, 80)}`);
 
-  // Trust-gate (RDR-004 §Item 4 step 7): if a trust block was verified at
-  // loadSurface time, gate every a2ui.request against
-  // trust.actions ∩ trustStore[producerId].allowed_actions. If the payload
-  // is unsigned and default_policy=deny, refuse all bridge-routed methods.
+  // Trust-gate (RDR-004 §Item 4 step 7): gate every a2ui.request based on
+  // the trust state captured at loadSurface time.
+  //
+  // Three states matter:
+  //   (A) verified + known producer (verifiedActions is a list, possibly empty)
+  //       → enforce trust.actions ∩ trustStore[producerId].allowed_actions
+  //   (B) verified signature BUT producer not in trust store
+  //       (verifiedTrust set, verifiedActions === null)
+  //       → bridge-routed methods denied under any policy except "allow";
+  //         RDR-004 §Item 5 says "log-only … bridge-routed methods are denied
+  //         with a modal explaining the missing-trust state".
+  //   (C) unsigned payload (verifiedTrust === null)
+  //       → apply default_policy: deny refuses, log-only warns + denies
+  //         bridge-routed methods, allow lets everything through.
+  const policy = trustStoreDefaultPolicy(loadTrustStore());
   if (verifiedTrust && verifiedActions !== null) {
+    // (A) known producer with an action allowlist
     if (!verifiedActions.includes(m.method)) {
       logLine('err', `← trust deny: ${m.method} not in producer's allowlist (${verifiedActions.join(',') || '<empty>'})`);
       frame.contentWindow.postMessage({
@@ -311,14 +336,34 @@ async function handleRequest(m) {
       }, '*');
       return;
     }
-  } else if (verifiedTrust === null && trustStoreDefaultPolicy(loadTrustStore()) === 'deny') {
+  } else if (verifiedTrust && verifiedActions === null && policy !== 'allow') {
+    // (B) signed by an unknown producer — deny bridge-routed methods unless policy='allow'
+    logLine('err', `← trust deny: unknown producer ${verifiedTrust.producerId.slice(0,12)}… (default_policy=${policy})`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: `Action '${m.method}' denied: producer ${verifiedTrust.producerId.slice(0,12)}… is not in the trust store (default_policy=${policy})`,
+    }, '*');
+    return;
+  } else if (verifiedTrust === null && policy === 'deny') {
+    // (C) unsigned + deny policy — refuse all bridge-routed methods
     logLine('err', `← trust deny: unsigned payload + default_policy=deny`);
     frame.contentWindow.postMessage({
       type: 'a2ui.response', requestId: m.requestId,
       error: 'Bridge-routed methods denied: no trust signature and default_policy=deny',
     }, '*');
     return;
+  } else if (verifiedTrust === null && policy === 'log-only') {
+    // (C) unsigned + log-only — deny bridge-routed methods per RDR-004 §Item 7;
+    // renderer-local actions (openUrl, copyToClipboard) bypass the bridge so
+    // they continue to execute.
+    logLine('err', `← trust deny: unsigned payload + default_policy=log-only (bridge-routed methods disabled)`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: `Action '${m.method}' denied: no trust signature (default_policy=log-only — bridge-routed methods disabled)`,
+    }, '*');
+    return;
   }
+  // verifiedTrust === null && policy === 'allow' → fall through (development mode)
 
   if (!backend) {
     logLine('err', `← no backend configured (${label})`);
