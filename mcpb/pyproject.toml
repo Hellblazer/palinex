@@ -1,10 +1,10 @@
 [project]
 name = "palinex-mcpb"
-version = "0.1.0"
+version = "0.2.0"
 description = "Palinex packaged as a Claude Desktop .mcpb extension."
 requires-python = ">=3.12"
 dependencies = [
-    "palinex[mcp]>=0.1.0",
+    "palinex[mcp]>=0.2.0",
 ]
 
 [tool.uv]
