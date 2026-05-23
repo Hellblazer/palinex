@@ -303,8 +303,8 @@ All four followed the dispatch pattern established by the original 14. `BASIC_CO
 ### Phase 3: Action registry hardening
 
 - [x] Document the postMessage RPC protocol as a stable contract (separate spec doc) — `docs/protocols/postmessage-rpc.md` + conformance test `tests/test_protocol_spec.py`
-- [ ] Add `runSkill` (nexus-specific) to the host-bridge example
-- [ ] Add `openFile` (editor-host-specific) to the host-bridge example
+- [x] Add `runSkill` (nexus-specific) to the host-bridge example — landed in `web/host-bridge.html` MOCK_BACKEND + HTTP_BACKEND alongside the trust-gate work, formalised with `tests/test_host_bridge.py` conformance tests
+- [x] Add `openFile` (editor-host-specific) to the host-bridge example — `web/host-bridge.html` MOCK_BACKEND.openFile + HTTP_BACKEND.openFile (POST to `{baseUrl}/file/open`), with three-resolver-path documentation comment block
 - [x] Define trust-gate signature: how a host decides which actions a given producer may emit — `docs/rdr/rdr-004-trust-gate-signature.md` (design + Phase 4b producer + bridge implementation); follow-up beads for renderer-side MUST-verify, Gap 5 param scoping, Gap 6 operator UX
 
 ### Phase 4: Per-host catalogs (deferred)
