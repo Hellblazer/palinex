@@ -610,6 +610,13 @@ RDR updates:
   Periodic summary report ("you have seen N unsigned payloads from M
   distinct producers in the last 30 days") so an operator can decide when
   to switch `default_policy` to `deny`. Tracked as bead `palinex-ciy`.
+- **Renderer-side MUST-verify** (RDR-004 §Item 4 requirement). The
+  Phase 4b implementation (`palinex-4ae`) shipped the bridge-side
+  authoritative verifier but deferred the renderer-side check due to
+  the renderer's LOC ceiling. Tracked as bead `palinex-rl0`. The
+  bridge-side check is the security-critical path; the renderer-side
+  is defense-in-depth for renderer-local actions (`openUrl`,
+  `copyToClipboard`).
 - Trust-store editor UI for host operators.
 - Producer-key generation CLI (`palinex keygen`).
 - Optional JWS-EdDSA `algorithm` variant for JOSE interop.

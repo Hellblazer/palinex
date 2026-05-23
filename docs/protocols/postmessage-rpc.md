@@ -281,11 +281,32 @@ behaviour for unknown methods is to error.
 
 ### 5.4 Trust gate hook
 
-A future trust-gate specification (palinex Phase 3 follow-up, see RDR-001
-§Item 7) will define how a host bridge decides which methods a given
-producer's payload may invoke. v1.0 does not define a trust gate — bridges
-either expose a method or they don't. Bridges SHOULD be conservative when
-exposing methods that have side effects beyond the renderer.
+The trust-gate is defined by RDR-004 (`docs/rdr/rdr-004-trust-gate-signature.md`).
+A producer that wants its actions enforced by the host MAY attach a
+`trust` block to its payload, signed Ed25519 over the RFC 8785 JCS
+canonical form. A conforming host bridge:
+
+1. MUST verify the signature, the `producerId` cross-check, the freshness
+   window, and the replay nonce before forwarding any `a2ui.load` to the
+   renderer.
+2. MUST gate every `a2ui.request` on
+   `m.method ∈ trust.actions ∩ trustStore[trust.producerId].allowed_actions`
+   when a valid trust block was observed.
+3. When the payload is unsigned (no `trust` block), the bridge MUST apply
+   its configured `default_policy`. The RECOMMENDED default is
+   `log-only`: bridge-routed methods deny with a visible banner; renderer-
+   local methods (`openUrl`, `copyToClipboard`) execute. This preserves
+   backward compatibility with payloads produced before the trust-gate
+   was specified.
+4. Renderer-local actions in standalone (`file://`) mode have no host
+   bridge to gate them and are an explicit accepted residual risk for
+   v1.0 (RDR-004 Phase 4c follow-up).
+
+Bridges that do NOT yet implement the trust-gate continue to be
+conforming under this protocol v1.0 — the trust block is OPTIONAL and
+`default_policy: "allow"` is a valid (development-only) setting that
+matches the pre-RDR-004 behaviour. Bridges SHOULD still be conservative
+when exposing methods that have side effects beyond the renderer.
 
 ## 6. Timeout Semantics
 

@@ -165,11 +165,13 @@ Three actions are first-class in v1:
 
 | Action | Resolution | Trust |
 |---|---|---|
-| `openUrl` | `window.open(url, "_blank", "noopener")` | URL must come from trusted source (producer-side discipline) |
-| `copyToClipboard` | `navigator.clipboard.writeText(value)` | always safe |
-| `openChash` | Host-bridged via postMessage RPC | host decides whether to resolve |
+| `openUrl` | `window.open(url, "_blank", "noopener")` | URL must come from trusted source (producer-side discipline; **formalised by RDR-004** trust-gate signature when producer signs `trust.actions`) |
+| `copyToClipboard` | `navigator.clipboard.writeText(value)` | always safe at the host boundary; producer's `trust.actions` self-declaration applies per RDR-004 |
+| `openChash` | Host-bridged via postMessage RPC | host decides whether to resolve; bridge gates on `trust.actions ∩ trustStore[producerId].allowed_actions` per RDR-004 |
 
 All other actions go through the same postMessage path with `method` set to the action name. Default host-bridge behavior: log but don't execute. Producers and hosts add to the allowlist incrementally.
+
+**RDR-004 (trust-gate signature)** formalises the trust posture this Item describes informally. Once a producer signs a payload with an Ed25519 key and the host bridge has a matching trust-store entry, action authorisation is enforced at the bridge by intersecting the producer's self-declared `trust.actions` with the host's `allowed_actions`. Unsigned payloads fall through to the host's `default_policy` (default `log-only`) for backward compatibility with palinex 0.0.x–0.3.x. See `docs/rdr/rdr-004-trust-gate-signature.md` for the full design and `docs/protocols/postmessage-rpc.md` §5.4 for the protocol hook.
 
 **Item 8: Reference host-bridge wrapper (`host-bridge.html`).**
 
@@ -303,7 +305,7 @@ All four followed the dispatch pattern established by the original 14. `BASIC_CO
 - [x] Document the postMessage RPC protocol as a stable contract (separate spec doc) — `docs/protocols/postmessage-rpc.md` + conformance test `tests/test_protocol_spec.py`
 - [ ] Add `runSkill` (nexus-specific) to the host-bridge example
 - [ ] Add `openFile` (editor-host-specific) to the host-bridge example
-- [ ] Define trust-gate signature: how a host decides which actions a given producer may emit
+- [x] Define trust-gate signature: how a host decides which actions a given producer may emit — `docs/rdr/rdr-004-trust-gate-signature.md` (design + Phase 4b producer + bridge implementation); follow-up beads for renderer-side MUST-verify, Gap 5 param scoping, Gap 6 operator UX
 
 ### Phase 4: Per-host catalogs (deferred)
 

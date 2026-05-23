@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>a2ui trust gate · reference verifier</title>
+<!--
+  Standalone reference verifier for the palinex trust-gate signature
+  scheme defined in RDR-004. Single-file, no build step, no daemon.
+
+  Pairs with the Python producer (palinex.signing.sign_payload). A host
+  bridge that wants to consume signed a2ui surfaces SHOULD inline the
+  same algorithms — this page exists as a copy-paste reference and as
+  an interactive verifier (paste a signed payload, see the trust block
+  parsed).
+
+  Algorithms:
+   - Ed25519 (RFC 8032) via Web Crypto API, with @noble/ed25519 fallback
+     for browsers without Web Crypto Ed25519 support.
+   - RFC 8785 JCS for canonical JSON serialisation.
+   - SHA-256 via Web Crypto.
+
+  This file is the JS sibling of palinex.signing.verify_payload.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px;
+    font: 14px/1.5 system-ui, sans-serif;
+    max-width: 920px; margin-inline: auto;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #666; margin-bottom: 20px; font-size: 13px; }
+  @media (prefers-color-scheme: dark) { .sub { color: #aaa; } }
+  textarea {
+    width: 100%; min-height: 220px; font: 12px/1.4 ui-monospace, monospace;
+    padding: 10px; border-radius: 6px; border: 1px solid #c0c0c0;
+    background: transparent; color: inherit; resize: vertical;
+  }
+  @media (prefers-color-scheme: dark) { textarea { border-color: #444; } }
+  .row { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+  button { font: inherit; padding: 6px 14px; border-radius: 6px; cursor: pointer; }
+  button.primary { background: #2050c0; color: white; border: 1px solid #2050c0; }
+  button.primary:hover { background: #1840a0; }
+  .result {
+    margin-top: 14px; padding: 12px; border-radius: 6px; font-size: 13px;
+    background: rgba(0,0,0,0.04); border: 1px solid transparent;
+  }
+  @media (prefers-color-scheme: dark) { .result { background: rgba(255,255,255,0.04); } }
+  .result.ok    { border-color: #2e7d32; }
+  .result.err   { border-color: #b00020; }
+  .result.warn  { border-color: #c89030; }
+  .result pre   { margin: 4px 0 0; white-space: pre-wrap; font: 12px ui-monospace, monospace; }
+  .label { font-weight: 600; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 12px; color: #666; }
+  @media (prefers-color-scheme: dark) { summary { color: #aaa; } }
+</style>
+</head>
+<body>
+
+<h1>a2ui trust gate — reference verifier</h1>
+<div class="sub">
+  Single-file reference implementation of RDR-004's verify_payload in JavaScript.
+  Paste a signed a2ui surface payload below; the page verifies the
+  Ed25519 signature against the inline <code>trust.publicKey</code>,
+  cross-checks the <code>producerId</code> fingerprint, and reports
+  freshness. No trust-store policy is applied here — that's a host
+  bridge concern (see <code>web/host-bridge.html</code>).
+</div>
+
+<textarea id="payload" placeholder='{"version":"v0.9","createSurface":{...},"trust":{"producerId":"k_...","publicKey":"...","algorithm":"Ed25519","actions":["openUrl"],"issuedAt":"2026-05-23T18:00:00Z","expiresAt":"2026-05-23T19:00:00Z","nonce":"...","signature":"..."}}'></textarea>
+<div class="row">
+  <button class="primary" id="verify-btn">Verify</button>
+  <button id="example-btn">Load example (unsigned)</button>
+  <button id="clear-btn">Clear</button>
+</div>
+<div id="result"></div>
+
+<script type="module">
+const ALGORITHM = 'Ed25519';
+const REQUIRED_FIELDS = [
+  'producerId', 'publicKey', 'algorithm', 'actions',
+  'issuedAt', 'expiresAt', 'nonce', 'signature',
+];
+const CLOCK_SKEW_SECONDS = 60;
+
+// ---- base64url helpers (no padding, RFC 7515 §2) -----------------------
+
+function b64uEncode(bytes) {
+  let s = btoa(String.fromCharCode(...bytes));
+  return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64uDecode(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// ---- RFC 8785 JCS canonical JSON --------------------------------------
+//
+// Minimal implementation matching the Python `rfc8785` package's
+// behaviour for the subset of values we accept (no NaN/Infinity, no
+// undefined). Strings reuse JSON.stringify which is JCS-compatible
+// for the required UTF-16 escape behaviour.
+
+function jcs(value) {
+  if (value === null) return 'null';
+  const t = typeof value;
+  if (t === 'boolean') return value ? 'true' : 'false';
+  if (t === 'number') {
+    if (!Number.isFinite(value)) throw new Error('non-finite number in payload');
+    // JCS uses ECMA-262 number-to-string, which is what JS String() does.
+    return String(value);
+  }
+  if (t === 'string') return JSON.stringify(value);
+  if (Array.isArray(value)) return '[' + value.map(jcs).join(',') + ']';
+  if (t === 'object') {
+    const keys = Object.keys(value).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + jcs(value[k])).join(',') + '}';
+  }
+  throw new Error('unsupported type: ' + t);
+}
+
+// ---- producerId fingerprint -------------------------------------------
+
+async function fingerprint(pubkeyBytes) {
+  const digest = await crypto.subtle.digest('SHA-256', pubkeyBytes);
+  return 'k_' + b64uEncode(new Uint8Array(digest));
+}
+
+// ---- Ed25519 verify, Web Crypto with @noble fallback ------------------
+
+let _nobleEd25519 = null;
+async function loadNoble() {
+  if (_nobleEd25519) return _nobleEd25519;
+  _nobleEd25519 = await import('https://cdn.jsdelivr.net/npm/@noble/ed25519@2.1.0/+esm');
+  return _nobleEd25519;
+}
+
+async function ed25519Verify(pubkeyBytes, signatureBytes, messageBytes) {
+  // Prefer Web Crypto when available.
+  try {
+    const key = await crypto.subtle.importKey(
+      'raw', pubkeyBytes, { name: 'Ed25519' }, false, ['verify'],
+    );
+    return await crypto.subtle.verify('Ed25519', key, signatureBytes, messageBytes);
+  } catch (e) {
+    // Web Crypto without Ed25519 support throws; fall back to @noble.
+    const noble = await loadNoble();
+    return await noble.verifyAsync(signatureBytes, messageBytes, pubkeyBytes);
+  }
+}
+
+// ---- The verifier ------------------------------------------------------
+//
+// Mirrors palinex.signing.verify_payload (Python). Throws a typed Error
+// with a .kind tag mapping 1:1 to the RDR-004 §Item 6 failure modes.
+
+class TrustError extends Error {
+  constructor(message, kind) { super(message); this.kind = kind; }
+}
+
+async function verifyPayload(payload, { now } = {}) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new TrustError('payload must be a JSON object', 'malformed');
+  }
+  if (!('trust' in payload)) {
+    throw new TrustError('payload has no `trust` block', 'malformed');
+  }
+  const trust = payload.trust;
+  if (!trust || typeof trust !== 'object' || Array.isArray(trust)) {
+    throw new TrustError('`trust` block must be an object', 'malformed');
+  }
+  const missing = REQUIRED_FIELDS.filter(f => !(f in trust));
+  if (missing.length) {
+    throw new TrustError(`trust block missing required fields: ${missing.join(', ')}`, 'malformed');
+  }
+  if (trust.algorithm !== ALGORITHM) {
+    throw new TrustError(`unsupported algorithm: ${trust.algorithm}`, 'malformed');
+  }
+
+  // 1. Identity cross-check.
+  let pubkeyBytes;
+  try { pubkeyBytes = b64uDecode(trust.publicKey); }
+  catch (e) { throw new TrustError(`publicKey is not valid base64url: ${e.message}`, 'malformed'); }
+  const expectedId = await fingerprint(pubkeyBytes);
+  if (trust.producerId !== expectedId) {
+    throw new TrustError(
+      `producerId ${trust.producerId} does not match k_<sha256(publicKey)>=${expectedId}`,
+      'identity',
+    );
+  }
+
+  // 2. Signature verification over JCS(payload \ {trust.signature}).
+  let sigBytes;
+  try { sigBytes = b64uDecode(trust.signature); }
+  catch (e) { throw new TrustError(`signature is not valid base64url: ${e.message}`, 'malformed'); }
+  const trustNoSig = { ...trust };
+  delete trustNoSig.signature;
+  const payloadNoSig = { ...payload, trust: trustNoSig };
+  const canonical = new TextEncoder().encode(jcs(payloadNoSig));
+  const sigOk = await ed25519Verify(pubkeyBytes, sigBytes, canonical);
+  if (!sigOk) {
+    throw new TrustError(
+      'Ed25519 signature verification failed — payload tampered or signed by a different key',
+      'signature',
+    );
+  }
+
+  // 3. Freshness.
+  const nowMs = (now instanceof Date ? now : new Date()).getTime();
+  const issuedMs = Date.parse(trust.issuedAt);
+  const expiresMs = Date.parse(trust.expiresAt);
+  if (Number.isNaN(issuedMs) || Number.isNaN(expiresMs)) {
+    throw new TrustError(`invalid RFC 3339 timestamp(s) in trust block`, 'malformed');
+  }
+  if (nowMs > expiresMs) {
+    throw new TrustError(
+      `payload expired: expiresAt=${trust.expiresAt}, now=${new Date(nowMs).toISOString()}`,
+      'freshness',
+    );
+  }
+  if (issuedMs > nowMs + CLOCK_SKEW_SECONDS * 1000) {
+    throw new TrustError(
+      `payload issued in the future: issuedAt=${trust.issuedAt}, now=${new Date(nowMs).toISOString()}`,
+      'freshness',
+    );
+  }
+
+  return trust;
+}
+
+// ---- ReplayCache (RDR-004 §Item 4 step 5) -----------------------------
+
+class ReplayCache {
+  constructor() { this._seen = new Map(); }
+  checkAndRecord(producerId, nonce, expiresAt, { now } = {}) {
+    const nowMs = (now instanceof Date ? now : new Date()).getTime();
+    // Lazy eviction.
+    for (const [k, exp] of this._seen) {
+      if (exp < nowMs) this._seen.delete(k);
+    }
+    const key = producerId + '\0' + nonce;
+    if (this._seen.has(key)) return false;
+    const expMs = expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt);
+    this._seen.set(key, expMs);
+    return true;
+  }
+  get size() { return this._seen.size; }
+}
+
+// ---- Expose for host-bridge.html re-use --------------------------------
+//
+// The bridge's <script type="module"> re-imports this file's API by
+// loading trust-gate.html in a hidden iframe and reading window.a2uiTrustGate.
+// Or, more commonly, copy-pastes the verifyPayload / ReplayCache code
+// directly. This export is for the interactive demo on this page.
+
+window.a2uiTrustGate = { verifyPayload, ReplayCache, jcs, fingerprint, b64uEncode, b64uDecode };
+
+// ---- Demo UI ---------------------------------------------------------
+
+const $payload = document.getElementById('payload');
+const $result = document.getElementById('result');
+const $verify = document.getElementById('verify-btn');
+const $example = document.getElementById('example-btn');
+const $clear = document.getElementById('clear-btn');
+
+function renderResult(kind, label, detail, parsed) {
+  $result.className = 'result ' + kind;
+  let html = `<div class="label">${label}</div>`;
+  if (detail) html += `<pre>${escapeHtml(detail)}</pre>`;
+  if (parsed) {
+    html += `<details><summary>Parsed trust block</summary><pre>${escapeHtml(JSON.stringify(parsed, null, 2))}</pre></details>`;
+  }
+  $result.innerHTML = html;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+$verify.addEventListener('click', async () => {
+  let payload;
+  try { payload = JSON.parse($payload.value); }
+  catch (e) {
+    renderResult('err', '✗ Could not parse JSON', e.message);
+    return;
+  }
+  try {
+    const trust = await verifyPayload(payload);
+    renderResult('ok', `✓ Signature verified for producer ${trust.producerId.slice(0, 12)}…`,
+      `Algorithm: ${trust.algorithm}\nActions:  ${trust.actions.join(', ')}\nIssued:    ${trust.issuedAt}\nExpires:   ${trust.expiresAt}`,
+      trust);
+  } catch (e) {
+    const kind = (e instanceof TrustError) ? e.kind : 'unknown';
+    renderResult('err', `✗ Verification failed (${kind})`, e.message);
+  }
+});
+
+$example.addEventListener('click', () => {
+  $payload.value = JSON.stringify({
+    version: 'v0.9',
+    createSurface: { surfaceId: 'demo', catalogId: 'a2ui.basic.v0_9' },
+    // No trust block — verifier will reject as "malformed: no `trust` block".
+  }, null, 2);
+  renderResult('warn', 'Unsigned payload loaded',
+    'Click Verify to see the rejection path. To see a successful verify, ' +
+    'generate a signed payload with palinex.signing.sign_payload() in Python.');
+});
+
+$clear.addEventListener('click', () => {
+  $payload.value = '';
+  $result.innerHTML = '';
+  $result.className = '';
+});
+</script>
+
+</body>
+</html>

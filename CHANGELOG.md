@@ -11,7 +11,29 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 - **`tests/test_rdr_004_structure.py`** (35 structural checks) — asserts RDR-004 retains its frontmatter, canonical RDR sections, all nine `trust`-block field references, the Ed25519 / RFC 8785 algorithm choices, the replay/nonce mechanism, both Gap 5 and Gap 6 follow-up-bead references, the `effective_expiry` precedence rule, the renderer-MUST-verify rule, the producerId-keyed trust store, and the substantive-critic paper trail. Catches design-doc drift until Phase 4b lands behavioural tests.
 
 ### Changed
-- **RDR-001 Phase 3** — Item 1 ("Document the postMessage RPC protocol as a stable contract") checked off, with the spec doc and conformance test as deliverables.
+- **RDR-001 Phase 3** — Item 1 ("Document the postMessage RPC protocol as a stable contract") and Item 4 ("Define trust-gate signature") checked off, with the spec doc, RDR-004 design, and Phase 4b implementation as deliverables.
+- **RDR-001 §Item 7** amended to reference RDR-004 as the formal mechanism. Trust posture moves from "producer-side discipline" prose to a host-enforced gate: bridge intersects producer's self-declared `trust.actions` with the host's per-producer `allowed_actions` from a `localStorage`-backed trust store; unsigned payloads fall through to `default_policy` (default `log-only`, preserving 0.0.x–0.3.x backward compatibility).
+- **`docs/protocols/postmessage-rpc.md` §5.4 (Trust gate hook)** rewritten — previously "a future trust-gate specification will define…", now points at RDR-004 with normative MUST/SHOULD/MAY semantics for bridges that implement the gate. Bridges that don't implement the gate remain conforming under protocol v1.0 (`default_policy: "allow"` is the pre-RDR-004 behaviour).
+
+### Trust-gate (RDR-004 Phase 4b)
+
+Producer side (Python, behind `pip install palinex[sign]`):
+- **`palinex.signing` module** — Ed25519 (`cryptography` package) + RFC 8785 JCS canonicalisation (`rfc8785` package), 40 behavioural tests in `tests/test_signing.py`.
+- **`SigningKey`** wraps Ed25519 private key, exposes `producer_id` (`k_<base64url-sha256-of-pubkey>`), `public_key_b64u`, `to_bytes`, `sign_bytes`. Construct via `generate()` or `from_seed(32-bytes)`.
+- **`sign_payload(payload, key, actions, …)`** attaches the normative `trust` block and signs the JCS canonical form of `payload + trust-block-minus-signature`. Rejects NaN/Infinity floats before canonicalisation; caps `ttl_seconds` at 3600; requires non-empty `actions`; refuses payloads with an existing `trust` block.
+- **`verify_payload(payload, now=…)`** — Python reference verifier; verification order matches RDR-004 §Item 4 (structural → identity cross-check → Ed25519 → freshness). Raises one of four `TrustError` subclasses (`SignatureError`, `IdentityError`, `FreshnessError`, `MalformedTrustError`) mapping 1:1 to RDR-004 §Item 6 failure modes.
+- **`ReplayCache`** — in-memory `(producerId, nonce)` cache for the freshness window per RDR-004 §Item 4 step 5. Lazy eviction once entries' `expires_at` passes.
+- **`Surface.sign(...)`** convenience shim on the builder; lazy-imports `palinex.signing` so base `import palinex` doesn't pull crypto deps.
+
+Host bridge side (JavaScript, single-file):
+- **`web/trust-gate.html`** (~325 LOC) — standalone reference verifier; interactive demo for pasting a signed payload and seeing verify-or-reject. JCS in JS, Web Crypto API Ed25519 with `@noble/ed25519@2.1.0` ESM fallback for older browsers, SHA-256 fingerprint computation, `ReplayCache` mirror.
+- **`web/host-bridge.html`** (~480 LOC, under the 600 warn / 900 hard ceiling) — integrates `trustGateCheck()` into `loadSurface()` so every payload is verified before delivery; gates `handleRequest()` on `trust.actions ∩ trustStore[producerId].allowed_actions`; loads the trust store from `localStorage` key `a2ui-trust-store.v1`; honours `default_policy = log-only | deny | allow`. Operator helpers `setTrustStore/getTrustStore` exposed via `window.a2uiHostBridge` for console-driven trust-store editing.
+
+Tests:
+- **`tests/test_signing.py`** (40 tests) — see producer-side bullet above.
+- **`tests/test_trust_gate.py`** (24 tests) — three RDR-004 scenarios (nexus signs runSkill, untrusted producer + default-policy fallback, key rotation with `valid_until` and hard revocation); replay attack within freshness window; JS-source conformance assertions ensuring `web/trust-gate.html` and `web/host-bridge.html` continue to declare the same primitives, required-fields set, and algorithm strings as the Python reference; LOC-ceiling guards on both JS files.
+
+Deferred to follow-up bead (palinex-rl0): renderer-side MUST-verify rule from RDR-004 §Item 4. `web/index.html` is at 857 LOC against a 900 hard ceiling; adding Web Crypto Ed25519 + JCS inline would push past it. The bridge-side check is the security-critical path; renderer-side is defense-in-depth for renderer-local actions.
 
 ## [0.3.0] — 2026-05-23
 
