@@ -39,15 +39,25 @@ Renderer = "https://hellblazer.github.io/palinex/"
 Issues = "https://github.com/Hellblazer/palinex/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["palinex"]
+packages = ["src/palinex"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "palinex/",
+    "src/palinex/",
+    "web/",
+    "plugin/",
+    "docs/",
     "README.md",
     "LICENSE",
     "pyproject.toml",
+    "CHANGELOG.md",
+    "AGENTS.md",
     "A2UI-V09-DIVERGENCE.md",
-    "index.html",
-    "host-bridge.html",
 ]
+
+[tool.pytest.ini_options]
+# src-layout: tests find palinex via ./src/palinex without needing an
+# editable install or per-call PYTHONPATH=. Hooks (.githooks/{pre-commit,
+# pre-push}) and CI both rely on this picking up the package.
+pythonpath = ["src"]
+testpaths = ["tests"]

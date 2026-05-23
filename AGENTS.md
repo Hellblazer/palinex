@@ -9,13 +9,15 @@ Project guidance for AI coding agents working in this repository. `CLAUDE.md` is
 ```bash
 pip install palinex                              # builders only
 pip install palinex[validate]                    # + jsonschema for deep validation
+pip install palinex[nexus]                       # + nexus integration (chash resolver, sidecar)
+pip install palinex[mcp]                         # + MCP server entry point
 
-open index.html?demo=1                           # renderer with built-in demo
-open inspector.html                              # Pyodide-loaded surface validator
-open host-bridge.html                            # host-side postMessage bridge reference
+open web/index.html?demo=1                       # renderer with built-in demo
+open web/inspector.html                          # Pyodide-loaded surface validator
+open web/host-bridge.html                        # host-side postMessage bridge reference
 
 python3 -m venv .venv && .venv/bin/pip install pytest jsonschema
-PYTHONPATH=. .venv/bin/pytest tests/ -v          # 28 tests, all green
+.venv/bin/pytest tests/ -v                       # pytest picks up src/ via pyproject pythonpath
 ```
 
 ## Architecture at a glance
@@ -95,20 +97,38 @@ Active RDRs:
 
 All 18 a2ui v0.9 Basic Catalog components: Text · Image · Icon · Video · AudioPlayer · Row · Column · List · Card · Tabs · Modal · Divider · Button · TextField · CheckBox · ChoicePicker · Slider · DateTimeInput.
 
-## Files at the root
+## Repo layout
 
-| File | Role |
-|---|---|
-| `palinex/__init__.py` | Python builders + validator + markdown sidecar (~720 LOC) |
-| `index.html` | Renderer (~770 LOC) |
-| `host-bridge.html` | Reference host wrapper (~160 LOC) |
-| `inspector.html` | Pyodide-loaded validator (~890 LOC) |
-| `tests/test_builders.py` | 28-test suite |
-| `pyproject.toml` | hatchling backend, Apache-2.0, optional `[validate]` extra |
-| `docs/rdr/` | RDRs (RDR-001, RDR-002) |
-| `A2UI-V09-DIVERGENCE.md` | Audit notes against the v0.9 spec |
-| `CHANGELOG.md` | keep-a-changelog format |
-| `.github/workflows/{ci,release}.yml` | matrix tests + OIDC PyPI publish |
+```
+palinex/
+├── src/palinex/                 # Python package (src-layout)
+│   ├── __init__.py              # Surface builders, wrap_as_mcp_ui_resource (~720 LOC)
+│   ├── nexus_bridge.py          # nexus integration shim (optional via [nexus] extra)
+│   ├── mcp/                     # MCP server: python -m palinex.mcp
+│   │   ├── __main__.py
+│   │   └── server.py            # render_surface tool
+│   └── server/                  # HTTP sidecar: python -m palinex.server / palinex serve
+│       ├── __main__.py
+│       ├── app.py
+│       └── handlers/            # /api/chash, /api/search, /api/render, /api/health
+├── web/                         # Static frontend
+│   ├── index.html               # Renderer (~770 LOC)
+│   ├── host-bridge.html         # Reference host wrapper (~160 LOC)
+│   └── inspector.html           # Pyodide-loaded validator (~890 LOC)
+├── plugin/                      # Claude Code plugin
+│   ├── plugin.json
+│   ├── .mcp.json                # registers `python -m palinex.mcp`
+│   ├── skills/
+│   └── commands/
+├── tests/                       # pytest; src/ on path via pyproject pythonpath
+├── docs/
+│   ├── rdr/                     # RDR-001, RDR-002, RDR-003
+│   └── architecture-sequence.md
+├── pyproject.toml               # hatchling, Apache-2.0, extras: [validate] [nexus] [mcp] [all]
+├── README.md, CHANGELOG.md, AGENTS.md, CLAUDE.md (symlink), LICENSE
+├── A2UI-V09-DIVERGENCE.md       # v0.9 audit notes
+└── .github/workflows/           # ci.yml, release.yml, pages.yml (deploys web/)
+```
 
 ## What lives in nexus (not here)
 

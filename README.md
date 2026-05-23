@@ -6,10 +6,11 @@ A small library + reference renderer for [a2ui v0.9](https://a2ui.org/) surfaces
 
 ## What's in here
 
-- **`palinex/`** — Python package. Typed builders that emit v0.9-conformant payloads from native Python; structural validation built in, optional jsonschema deep validation via `pip install palinex[validate]`.
-- **`index.html`** — single-file HTML renderer. Open in a browser. Accepts v0.9 message envelopes via URL param, file picker, or postMessage. lit-html from CDN, no build step.
-- **`host-bridge.html`** — reference wrapper that embeds the renderer in an iframe and implements the `a2ui.request` / `a2ui.response` postMessage protocol. For hosts (Claude Code MCP UI resources, custom web shells) that bridge agent-side data sources to the renderer.
-- **`inspector.html`** — single-file Pyodide-loaded surface validator. Paste/drop/URL-load a payload; get structural validation, component table with role inference (root / child of X / template / orphan), data-path walker, and (opt-in) deep schema validation + markdown sidecar via `palinex[validate]` running in-browser.
+- **`src/palinex/`** — Python package. Typed builders that emit v0.9-conformant payloads from native Python; structural validation built in, optional jsonschema deep validation via `pip install palinex[validate]`. Also ships an MCP server (`python -m palinex.mcp`) and an HTTP sidecar (`palinex serve`).
+- **`web/index.html`** — single-file HTML renderer. Open in a browser. Accepts v0.9 message envelopes via URL param, file picker, or postMessage. lit-html from CDN, no build step.
+- **`web/host-bridge.html`** — reference wrapper that embeds the renderer in an iframe and implements the `a2ui.request` / `a2ui.response` postMessage protocol. For hosts (Claude Code MCP UI resources, custom web shells) that bridge agent-side data sources to the renderer.
+- **`web/inspector.html`** — single-file Pyodide-loaded surface validator. Paste/drop/URL-load a payload; get structural validation, component table with role inference (root / child of X / template / orphan), data-path walker, and (opt-in) deep schema validation + markdown sidecar via `palinex[validate]` running in-browser.
+- **`plugin/`** — Claude Code plugin (manifest + MCP server registration + skills + commands). Installable directly from the GitHub URL; auto-starts the palinex MCP server at Claude Code session boot.
 - **`A2UI-V09-DIVERGENCE.md`** — audit notes against the v0.9 spec; documents the structural choices the renderer and producer make.
 
 ## Install
@@ -30,7 +31,7 @@ git clone https://github.com/Hellblazer/palinex
 Renderer with the built-in demo:
 
 ```bash
-open index.html?demo=1
+open web/index.html?demo=1
 ```
 
 Generate a payload from Python and pipe it in:
