@@ -416,6 +416,45 @@ class Surface:
     def to_json(self, *, flat: bool = False, indent: int | None = 2) -> str:
         return json.dumps(self.emit_flat() if flat else self.emit(), indent=indent)
 
+    # ---- Trust-gate signing (RDR-004) ---------------------------------------
+
+    def sign(
+        self,
+        key,  # palinex.signing.SigningKey; not type-annotated to keep import lazy
+        actions,
+        *,
+        producer_name=None,
+        ttl_seconds=3600,
+        nonce=None,
+        issued_at=None,
+        flat=False,
+    ):
+        """Emit this surface as a signed payload with a ``trust`` block.
+
+        Convenience shim around :func:`palinex.signing.sign_payload`. Builds
+        the envelope (``emit()`` or ``emit_flat()`` depending on ``flat``),
+        then attaches a normative ``trust`` block per RDR-004.
+
+        Importing :mod:`palinex.signing` is deferred until this method runs
+        so that ``import palinex`` doesn't transitively require
+        ``cryptography`` / ``rfc8785`` for users who never sign.
+
+        See :func:`palinex.signing.sign_payload` for parameter semantics and
+        the full failure-mode table.
+        """
+        from .signing import sign_payload  # lazy import — keeps base install slim
+
+        payload = self.emit_flat() if flat else self.emit()
+        return sign_payload(
+            payload,
+            key,
+            actions,
+            producer_name=producer_name,
+            ttl_seconds=ttl_seconds,
+            nonce=nonce,
+            issued_at=issued_at,
+        )
+
     # ---- Markdown sidecar ---------------------------------------------------
 
     def to_markdown(self) -> str:
