@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.anthropic.com/en/docs/claude-code/plugin-marketplaces",
+  "name": "palinex",
+  "owner": {
+    "name": "Hal Hildebrand",
+    "url": "https://github.com/Hellblazer"
+  },
+  "metadata": {
+    "description": "Single-plugin marketplace exposing the palinex plugin from the same repository.",
+    "version": "0.2.0"
+  },
+  "plugins": [
+    {
+      "name": "palinex",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/Hellblazer/palinex.git",
+        "path": "plugin",
+        "ref": "v0.2.0"
+      },
+      "description": "Render a2ui v0.9 surfaces inline in Claude Code chat via MCP UI resources.",
+      "version": "0.2.0"
+    }
+  ]
+}
