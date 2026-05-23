@@ -302,6 +302,87 @@ def test_wrap_preserves_input_payload():
     assert payload == original
 
 
+def test_wrap_with_resolver_substitutes_chashes_in_update_data_model_patch():
+    """palinex-e7z: a2ui v0.9 updateDataModel can carry a 'patch' field for
+    sparse data-model updates instead of (or alongside) the canonical 'value'
+    field. Pre-fix, _data_model_locations only recognised 'value', so
+    patch-shaped payloads were silently passed through without chash resolution.
+    """
+    payload = {
+        "version": "v0.9",
+        "messages": [
+            {"version": "v0.9", "createSurface": {"surfaceId": "t", "catalogId": "a2ui.basic.v0_9"}},
+            {"version": "v0.9", "updateDataModel": {
+                "surfaceId": "t",
+                "path": "/items/0",
+                "patch": {"title": "alpha-updated", "chash": "abc123"},
+            }},
+            {"version": "v0.9", "updateComponents": {"surfaceId": "t", "components": [
+                {"id": "root", "component": "Text", "text": {"path": "/items/0/chash"}},
+            ]}},
+        ],
+    }
+    db = {"abc123": "the alpha chunk text (via patch)"}
+
+    def resolver(s):
+        return db.get(s)
+
+    html = wrap_as_mcp_ui_resource(payload, chash_resolver=resolver)
+    assert "the alpha chunk text (via patch)" in html, \
+        "chash inside updateDataModel.patch MUST be resolved (palinex-e7z)"
+    assert '"abc123"' not in html, "original chash MUST be substituted out"
+
+
+def test_wrap_with_resolver_substitutes_chashes_in_top_level_update_data_model_patch():
+    """Single-message variant: payload-level updateDataModel.patch."""
+    payload = {
+        "version": "v0.9",
+        "updateDataModel": {
+            "surfaceId": "t",
+            "path": "/items/0",
+            "patch": {"chash": "def456"},
+        },
+        "updateComponents": {"surfaceId": "t", "components": [
+            {"id": "root", "component": "Text", "text": {"path": "/items/0/chash"}},
+        ]},
+    }
+    db = {"def456": "resolved-from-toplevel-patch"}
+
+    def resolver(s):
+        return db.get(s)
+
+    html = wrap_as_mcp_ui_resource(payload, chash_resolver=resolver)
+    assert "resolved-from-toplevel-patch" in html
+    assert '"def456"' not in html
+
+
+def test_wrap_with_resolver_handles_value_and_patch_in_same_payload():
+    """A payload with BOTH a value-shaped updateDataModel and a patch-shaped
+    one (sparse follow-up update) MUST resolve chashes in both."""
+    payload = {
+        "version": "v0.9",
+        "messages": [
+            {"version": "v0.9", "createSurface": {"surfaceId": "t", "catalogId": "a2ui.basic.v0_9"}},
+            {"version": "v0.9", "updateDataModel": {"surfaceId": "t", "path": "/", "value": {
+                "first": "abc123",
+            }}},
+            {"version": "v0.9", "updateDataModel": {"surfaceId": "t", "path": "/second",
+                                                    "patch": {"chash": "def456"}}},
+            {"version": "v0.9", "updateComponents": {"surfaceId": "t", "components": [
+                {"id": "root", "component": "Text", "text": "x"},
+            ]}},
+        ],
+    }
+    db = {"abc123": "value-resolved", "def456": "patch-resolved"}
+
+    def resolver(s):
+        return db.get(s)
+
+    html = wrap_as_mcp_ui_resource(payload, chash_resolver=resolver)
+    assert "value-resolved" in html, "value-shaped resolution still works"
+    assert "patch-resolved" in html, "patch-shaped resolution works alongside"
+
+
 def test_wrap_renderer_url_is_html_escaped():
     payload = _simple_envelope()
     html = wrap_as_mcp_ui_resource(payload, renderer_url="https://example.com/x?a=1&b=2")

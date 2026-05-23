@@ -787,16 +787,32 @@ def _pre_resolve_payload(payload: dict[str, Any], resolver: Callable[[str], str 
 
 def _data_model_locations(payload: dict[str, Any]) -> list:
     """Return a list of (container, key) tuples pointing at every dataModel
-    value in the payload, regardless of shape (envelope or flat)."""
+    value in the payload, regardless of shape (envelope or flat).
+
+    a2ui v0.9 updateDataModel may carry either ``value`` (full state at the
+    given path) or ``patch`` (sparse update) — both are walked here so the
+    chash resolver substitutes references inside both shapes. A single
+    updateDataModel that legitimately carries BOTH ``value`` and ``patch``
+    (uncommon but spec-permitted) yields two locations. (palinex-e7z)
+    """
     locs: list = []
     if isinstance(payload.get("messages"), list):
         for m in payload["messages"]:
-            if isinstance(m, dict) and "updateDataModel" in m and "value" in m["updateDataModel"]:
-                locs.append((m["updateDataModel"], "value"))
+            if isinstance(m, dict) and "updateDataModel" in m:
+                udm = m["updateDataModel"]
+                if isinstance(udm, dict):
+                    if "value" in udm:
+                        locs.append((udm, "value"))
+                    if "patch" in udm:
+                        locs.append((udm, "patch"))
     if "dataModel" in payload:
         locs.append((payload, "dataModel"))
-    if "updateDataModel" in payload and "value" in payload["updateDataModel"]:
-        locs.append((payload["updateDataModel"], "value"))
+    if "updateDataModel" in payload and isinstance(payload["updateDataModel"], dict):
+        udm = payload["updateDataModel"]
+        if "value" in udm:
+            locs.append((udm, "value"))
+        if "patch" in udm:
+            locs.append((udm, "patch"))
     return locs
 
 

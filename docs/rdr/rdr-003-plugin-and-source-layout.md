@@ -127,12 +127,19 @@ mcpb/
 ```
 
 Built `.mcpb` archives (`palinex-<version>.mcpb`) and the local `.venv/` are
-gitignored — they're build/runtime artifacts, not source. Build output lands
-in `mcpb/palinex-<version>.mcpb` and is distributed out-of-band.
+gitignored — they're build/runtime artifacts, not source. As of 0.4.2 the
+bundle is also built automatically by `.github/workflows/release.yml` on
+every `v*` tag push (closes palinex-hg3): the workflow runs
+`mcpb pack mcpb /tmp/palinex-<version>.mcpb` via `@anthropic-ai/mcpb`,
+asserts `mcpb/manifest.json` `version` equals the tag, and attaches the
+archive as a GitHub Release asset alongside the wheel + sdist. Local
+builds still work for testing; the workflow is the canonical published
+artifact.
 
-The bundle is built externally (mcpb CLI or equivalent) and distributed as a
-`.mcpb` archive. Versioning: `mcpb/pyproject.toml` version and
-`mcpb/manifest.json` version both track `palinex` semver — bump together.
+The bundle's versioning rule is unchanged: `mcpb/pyproject.toml` version
+and `mcpb/manifest.json` version both track `palinex` semver — bump
+together with the root `pyproject.toml` at release time. `tests/test_plugin_structure.py`
+enforces this on every CI run.
 
 **Known limitation as of 0.2.0 (Claude Code Desktop v2.1.149):** the host
 does not currently render `ui://` HTML resources as inline iframes (per
@@ -142,11 +149,12 @@ fall back to the embedded-artifact / external-URL delivery shapes from
 RDR-001 Item 4. The bundle's `manifest.json` description reflects this
 honestly; see RDR-001 §Item 9 for the cross-reference.
 
-There is currently no automated release workflow for the `.mcpb` bundle
-(unlike PyPI publishing which is OIDC-trusted-publisher tag-triggered).
-Tracked as bead `palinex-hg3`: add a `release-mcpb.yml` workflow that
-builds the bundle on `v*` tag push and attaches the `.mcpb` archive as
-a GitHub release asset.
+_Previously a known gap (palinex-hg3): there was no automated release
+workflow for the `.mcpb` bundle (unlike PyPI publishing). Closed in 0.4.2 by
+extending `.github/workflows/release.yml` with an `mcpb pack` step rather
+than a separate `release-mcpb.yml` workflow — keeping a single release job
+prevents two workflows from racing on the same GitHub Release creation and
+isolates failures from PyPI publish under one rollup status check._
 
 **Item 4 — No HTTP sidecar.** Briefly scoped as `src/palinex/server/`,
 dropped per RDR-002 (Pyodide-as-default). The use cases the sidecar would
