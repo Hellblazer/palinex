@@ -4,6 +4,10 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-05-23
+
+Patch release. Live browser shake-out of v0.4.0 surfaced a single bug: the renderer dispatched extension functionCalls (anything other than the three first-class actions) as `method: "functionCall"` instead of using the actual action name, which broke RDR-001 §Item 7 and made the v0.4.0 RDR-004 trust-gate + extension-method end-to-end button-click path unreachable. One-line fix in `web/index.html`. No API changes. Tests now 224.
+
 ### Fixed (post-v0.4.0 live shake-out)
 
 - **Renderer dispatch wrapped extension methods as `method: "functionCall"`** (`web/index.html` `handleFunctionCall`), buryıng the actual method name in `params.call`. This broke RDR-001 §Item 7 ("All other actions go through the same postMessage path with method set to the action name") and meant the RDR-004 trust gate could not enforce per-method allowlisting against `trust.actions`. Side effect: MOCK_BACKEND.runSkill / openFile shipped in 0.4.0 were unreachable via renderer button-clicks (the bridge dispatched on `m.method = "functionCall"` and no `functionCall` handler existed). Reproduced live in a `python3 -m http.server` shake-out against `web/host-bridge.html`. One-line fix: `default` branch now dispatches with `hostBridge(fn.call, { ...args, sourceId })`. `tests/test_renderer_dispatch.py` (4 source-regex checks) guards against regression. (palinex-lc9)
