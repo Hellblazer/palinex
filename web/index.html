@@ -702,10 +702,10 @@ const DEMO = {
   messages: [
     { version: 'v0.9', createSurface: { surfaceId: 'demo.nx_answer', catalogId: 'a2ui.basic.v0_9' }},
     { version: 'v0.9', updateDataModel: { path: '/', value: {
-      synthesis: 'A2UI v0.9 is a declarative UI protocol for agent-generated interfaces. Surfaces are described as JSON; renderers map components to native widgets via per-host catalogs. This is a v0.9-conformant demo.',
+      synthesis: 'A2UI v0.9 is a declarative UI protocol for agent-generated interfaces. Surfaces are described as JSON; renderers map components to native widgets via per-host catalogs. This is a v0.9-conformant demo whose citations carry real 32-char chashes — connect this renderer to a nexus T3 host (or load this surface via palinex render_surface with the [nexus] extra) and clicking "Open chunk" returns real chunk text.',
       citations: [
-        { title: 'a2ui v0.9 specification', excerpt: 'Server-to-client messages: createSurface, updateComponents, updateDataModel, deleteSurface. Components are addressed in a flat array; id="root" anchors the tree.', chash: 'demo-1-abcd1234' },
-        { title: 'Basic Catalog reference', excerpt: 'Eighteen components covering text, layout (Row/Column/List/Card), media (Image/Icon/Video/AudioPlayer), input (TextField/CheckBox/ChoicePicker/Slider/DateTimeInput), and interaction (Button/Modal/Tabs/Divider).', chash: 'demo-2-ef567890' }
+        { title: 'RDR-127: Substrate-Decoupled Surface Rendering', excerpt: 'palinex as the v1 reference renderer; a2ui v0.9 as the IR. The surface gets rewritten in place — palin- (Greek: "again") + nexus (Latin: "bond"). nexus does not depend on palinex; the dependency arrow runs one direction.', chash: 'cfbd937e6addd5674fb6cde5b04a9fe1' },
+        { title: 'RDR-016: AST Chunk Line Range Bug', excerpt: 'CodeSplitter returns empty metadata, breaking context prefix. Representative of the kind of nexus T3 indexing finding that benefits from being surfaced as a citation card rather than flattened to markdown — clickable, copyable, navigable.', chash: 'e3458aa9ce0efa7a148302d4f98c50e2' }
       ]
     }}},
     { version: 'v0.9', updateComponents: { surfaceId: 'demo.nx_answer', components: [
@@ -767,17 +767,29 @@ document.getElementById('btn-demo')?.addEventListener('click', () => setSurface(
 // `wrap_as_mcp_ui_resource` end-state — openChash actions become
 // copyToClipboard, payload data model carries resolved text inline,
 // no host bridge required for the surface to be useful.
+//
+// Keyed by the real 32-char chashes used in the DEMO above so the wrapped
+// variant resolves to text that semantically matches the citation titles.
+// In a true producer flow these strings would come from nexus T3; here they
+// are inlined so the hosted demo is self-contained.
 const DEMO_WRAPPED_CHUNKS = {
-  'demo-1-abcd1234':
-    'This text was substituted into the data model by ' +
-    'palinex.wrap_as_mcp_ui_resource at producer-side wrap time. ' +
-    'The "Open chunk" button you clicked was rewritten to copyToClipboard, ' +
-    'and this paragraph is now in your clipboard. No live host bridge involved.',
-  'demo-2-ef567890':
-    'Same pattern — producer pre-resolved the chash reference against its ' +
-    'data source (e.g. nexus T3) before emitting the HTML. The renderer ' +
-    'rendered the resolved text inline; the button click was a pure ' +
-    'browser copy-to-clipboard. Static-snapshot integration in one step.',
+  'cfbd937e6addd5674fb6cde5b04a9fe1':
+    '# RDR-127: Substrate-Decoupled Surface Rendering\n\n' +
+    'palin- (Greek: "again") + nexus (Latin: "bond") — the surface gets ' +
+    'rewritten in place. palinex is the v1 reference renderer; a2ui v0.9 ' +
+    'is the IR. nexus does not depend on palinex; the dependency arrow ' +
+    'runs strictly one direction. This text was substituted into the data ' +
+    'model by wrap_as_mcp_ui_resource pre-resolve, and the "Open chunk" ' +
+    'button you clicked has been rewritten to copyToClipboard. No live ' +
+    'host bridge involved — static snapshot.',
+  'e3458aa9ce0efa7a148302d4f98c50e2':
+    '# RDR-016: AST Chunk Line Range Bug\n\n' +
+    'CodeSplitter returns empty metadata, breaking context prefix. ' +
+    'Representative nexus T3 indexing finding — exactly the kind of ' +
+    'content that benefits from being surfaced as a clickable, copyable, ' +
+    'navigable citation card rather than flattened to inline markdown. ' +
+    'Same wrap-time substitution as the citation above; same ' +
+    'copyToClipboard rewrite of the openChash action.',
 };
 
 function applyDemoWrap(payload) {
