@@ -18,6 +18,7 @@ Major restructure: palinex is now the **UI front-end for nexus** — library + C
 - 24 new tests bring total to 59 (13 for nexus_bridge, 11 for the MCP server) — all green across the Python 3.10–3.13 matrix.
 
 ### Changed
+- **`requires-python = ">=3.12"`** (was `>=3.10`). The `[nexus]` extra pulls `conexus>=4.34` which requires Python 3.12+; uv's dependency resolver fails the whole `[all]` extra when palinex declares broader support than nexus does. Honest fix: track nexus's support window. Library-only users on 3.10/3.11 can stay on palinex 0.0.x. CI + release matrices dropped to `["3.12", "3.13"]` accordingly.
 - **Source layout**: `palinex/` → `src/palinex/` (standard src-layout). Tests find the package via `[tool.pytest.ini_options] pythonpath = ["src"]` — no PYTHONPATH=. needed.
 - **Static frontend**: `index.html`, `host-bridge.html`, `inspector.html` → `web/`. GitHub Pages deploys from `web/` via a new `.github/workflows/pages.yml` workflow (switched from legacy `main/` to GitHub Actions deployment).
 - **AGENTS.md** + README updated for the new layout and install paths.
