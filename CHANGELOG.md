@@ -4,6 +4,9 @@ All notable changes to palinex are documented here. Format loosely follows [Keep
 
 ## [Unreleased]
 
+### Added
+- **`.github/workflows/release.yml` now builds and attaches the `.mcpb` Claude Desktop extension bundle** on every `v*` tag push, closing the gap RDR-003 §Item 3a flagged (`mcpb pack mcpb /tmp/palinex-<version>.mcpb` via `@anthropic-ai/mcpb`, plus an `mcpb/manifest.json` version-vs-tag parity check that fails loud on drift). Inlined into the existing release workflow rather than a separate `release-mcpb.yml` — single release job prevents two workflows racing on the GitHub Release creation step. Future tags will see `palinex-<version>.mcpb` as a downloadable asset alongside the wheel and sdist. (palinex-hg3)
+
 ### Fixed
 - **`_pre_resolve_payload` now recognises `updateDataModel.patch`** (`src/palinex/__init__.py`). a2ui v0.9 `updateDataModel` may carry either `value` (full state at path) or `patch` (sparse update). The pre-fix `_data_model_locations` walker only yielded `value` locations, so payloads using `patch` were silently passed through with no chash resolution. Fix extends the walker to yield both shapes for `messages[].updateDataModel` and for the top-level `updateDataModel` variant. Three new tests in `tests/test_builders.py` cover envelope-shape patch, top-level patch, and mixed value+patch in the same payload. (palinex-e7z)
 
