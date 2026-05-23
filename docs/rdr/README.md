@@ -9,6 +9,7 @@ Architectural decisions for the palinex project. Each RDR captures one durable d
 | [001](rdr-001-architecture.md) | palinex Architecture: a2ui v0.9 IR, SurfaceBroker Port, Three Delivery Shapes, postMessage Host Bridge | accepted (2026-05-23) | Architecture | high |
 | [002](rdr-002-pyodide-as-runtime-augmentation.md) | Pyodide as Preferred Runtime Augmentation: Producer + Validator + Inspector In-Browser, No Daemon | draft | Architecture | medium |
 | [003](rdr-003-plugin-and-source-layout.md) | Packaging: Claude Code Plugin + Claude Desktop .mcpb Bundle + nexus-front-end Role + src/ Layout | accepted (2026-05-23) | Architecture | high |
+| [004](rdr-004-trust-gate-signature.md) | Trust-Gate Signature: Producer-Identity Claims and Host-Enforced Action Allowlists for a2ui Surfaces | draft | Security | high |
 
 ## Conventions
 

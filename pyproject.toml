@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "palinex"
-version = "0.3.0"
+version = "0.4.0"
 description = "Typed Python builders + single-file HTML renderer for a2ui v0.9 surfaces. palin- (again) + nexus (bond) — surfaces get rewritten."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -35,12 +35,16 @@ nexus = ["conexus>=4.34"]
 # server itself is small (~80 LOC); fastmcp is the runtime dep that does the
 # heavy lifting.
 mcp = ["mcp>=1.0"]
+# [sign] enables the producer-side trust-gate (Surface.sign + verify_payload)
+# per RDR-004. Ed25519 via the `cryptography` package; RFC 8785 JCS
+# canonicalization via the `rfc8785` package. Both Apache-2.0 / BSD-2.
+sign = ["cryptography>=42", "rfc8785>=0.1.4"]
 # [all] is the kitchen-sink install — most users wanting the full plugin +
 # sidecar experience pick this.
-all = ["palinex[validate,nexus,mcp]"]
+all = ["palinex[validate,nexus,mcp,sign]"]
 
 [dependency-groups]
-dev = ["pytest>=8", "jsonschema>=4", "mcp>=1.0"]
+dev = ["pytest>=8", "jsonschema>=4", "mcp>=1.0", "cryptography>=42", "rfc8785>=0.1.4"]
 
 [project.urls]
 Homepage = "https://github.com/Hellblazer/palinex"

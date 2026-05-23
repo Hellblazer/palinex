@@ -3,7 +3,7 @@
   "manifest_version": "0.4",
   "name": "palinex",
   "display_name": "Palinex",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MCP server exposing render_surface — wraps a2ui v0.9 payloads as ui:// MCP UI resources.",
   "long_description": "Palinex wraps a2ui v0.9 surface payloads as MCP UI resources. Exposes a single tool, render_surface, that takes a surface payload and returns a ui:// resource pointing at the palinex renderer hosted at hellblazer.github.io/palinex. Hosts that mount ui:// HTML resources as inline iframes (claude.ai web, custom MCP UI hosts) display the rendered surface; Claude Desktop currently returns the resource envelope as text rather than mounting it inline — use the embedded-artifact or external-URL delivery shapes documented in palinex RDR-001 §Item 4 for Desktop until that lands. Optional nexus integration resolves chash references in the payload against nexus T3 when nexus is also installed.",
   "author": {

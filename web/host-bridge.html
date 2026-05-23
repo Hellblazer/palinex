@@ -90,7 +90,142 @@
 
 <script type="module">
 const CFG_KEY = 'a2ui-host-bridge.v1';
+const TRUST_KEY = 'a2ui-trust-store.v1';
 const cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+
+// ---- Trust gate (RDR-004) ---------------------------------------------
+//
+// Inline copy of palinex.signing.verify_payload + ReplayCache. The
+// canonical reference impl is in web/trust-gate.html; tests assert these
+// two files declare the same primitives. Inlining is per the
+// html-tool-patterns "one-file" discipline — each tool is independently
+// runnable without imports.
+
+const TG_ALGORITHM = 'Ed25519';
+const TG_REQUIRED = ['producerId','publicKey','algorithm','actions','issuedAt','expiresAt','nonce','signature'];
+const TG_SKEW_MS = 60_000;
+function tgB64uEnc(bytes) {
+  // Loop instead of spread — spread of Uint8Array crashes engines at ~65k elements.
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function tgB64uDec(s) {
+  s = s.replace(/-/g,'+').replace(/_/g,'/'); while (s.length % 4) s += '=';
+  const bin = atob(s); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function tgJcs(v) {
+  if (v === null) return 'null';
+  const t = typeof v;
+  if (t === 'boolean') return v ? 'true' : 'false';
+  if (t === 'number') { if (!Number.isFinite(v)) throw new Error('non-finite number'); return String(v); }
+  if (t === 'string') return JSON.stringify(v);
+  if (Array.isArray(v)) return '[' + v.map(tgJcs).join(',') + ']';
+  if (t === 'object') {
+    const k = Object.keys(v).sort();
+    return '{' + k.map(x => JSON.stringify(x) + ':' + tgJcs(v[x])).join(',') + '}';
+  }
+  throw new Error('unsupported type: ' + t);
+}
+async function tgFingerprint(pubkeyBytes) {
+  const d = await crypto.subtle.digest('SHA-256', pubkeyBytes);
+  return 'k_' + tgB64uEnc(new Uint8Array(d));
+}
+let _tgNoble = null;
+async function tgEd25519Verify(pub, sig, msg) {
+  try {
+    const key = await crypto.subtle.importKey('raw', pub, { name: 'Ed25519' }, false, ['verify']);
+    return await crypto.subtle.verify('Ed25519', key, sig, msg);
+  } catch (_) {
+    if (!_tgNoble) _tgNoble = await import('https://cdn.jsdelivr.net/npm/@noble/ed25519@2.1.0/+esm');
+    return await _tgNoble.verifyAsync(sig, msg, pub);
+  }
+}
+class TrustError extends Error { constructor(msg, kind) { super(msg); this.kind = kind; } }
+async function tgVerifyPayload(payload, { now } = {}) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new TrustError('payload must be object', 'malformed');
+  if (!('trust' in payload)) throw new TrustError('payload has no `trust` block', 'malformed');
+  const trust = payload.trust;
+  if (!trust || typeof trust !== 'object' || Array.isArray(trust)) throw new TrustError('`trust` must be object', 'malformed');
+  const missing = TG_REQUIRED.filter(f => !(f in trust));
+  if (missing.length) throw new TrustError(`trust missing: ${missing.join(', ')}`, 'malformed');
+  if (trust.algorithm !== TG_ALGORITHM) throw new TrustError(`unsupported algorithm: ${trust.algorithm}`, 'malformed');
+  const pub = tgB64uDec(trust.publicKey);
+  const expectedId = await tgFingerprint(pub);
+  if (trust.producerId !== expectedId) throw new TrustError(`producerId mismatch: got ${trust.producerId}, expected ${expectedId}`, 'identity');
+  const sig = tgB64uDec(trust.signature);
+  const trustNoSig = { ...trust }; delete trustNoSig.signature;
+  const payloadNoSig = { ...payload, trust: trustNoSig };
+  const msg = new TextEncoder().encode(tgJcs(payloadNoSig));
+  const ok = await tgEd25519Verify(pub, sig, msg);
+  if (!ok) throw new TrustError('Ed25519 signature verification failed', 'signature');
+  const nowMs = (now instanceof Date ? now : new Date()).getTime();
+  const expiresMs = Date.parse(trust.expiresAt);
+  const issuedMs = Date.parse(trust.issuedAt);
+  if (Number.isNaN(issuedMs) || Number.isNaN(expiresMs)) throw new TrustError('invalid RFC 3339 timestamp', 'malformed');
+  if (nowMs > expiresMs) throw new TrustError(`expired: expiresAt=${trust.expiresAt}`, 'freshness');
+  if (issuedMs > nowMs + TG_SKEW_MS) throw new TrustError(`issued in future: issuedAt=${trust.issuedAt}`, 'freshness');
+  return trust;
+}
+class ReplayCache {
+  constructor() { this._seen = new Map(); }
+  checkAndRecord(producerId, nonce, expiresAt) {
+    const nowMs = Date.now();
+    for (const [k, exp] of this._seen) { if (exp < nowMs) this._seen.delete(k); }
+    const key = producerId + '\0' + nonce;
+    if (this._seen.has(key)) return false;
+    this._seen.set(key, expiresAt instanceof Date ? expiresAt.getTime() : Date.parse(expiresAt));
+    return true;
+  }
+  get size() { return this._seen.size; }
+}
+const replayCache = new ReplayCache();
+let verifiedTrust = null;     // set after successful loadSurface verify
+let verifiedActions = null;   // intersected actions list, ready for handleRequest gating
+function loadTrustStore() {
+  try { return JSON.parse(localStorage.getItem(TRUST_KEY) || '{}'); }
+  catch (_) { return {}; }
+}
+function trustStoreAllowedActions(store, producerId) {
+  const entry = store?.keys?.[producerId];
+  if (!entry) return null;
+  // RDR-004 §Item 5 / §Item 6: a key past its valid_until is rotated out.
+  // Treat as unknown — falls through to default_policy.
+  if (entry.valid_until) {
+    const expiresMs = Date.parse(entry.valid_until);
+    if (!Number.isNaN(expiresMs) && expiresMs < Date.now()) {
+      return null;
+    }
+  }
+  return entry.allowed_actions || null;
+}
+function trustStoreDefaultPolicy(store) {
+  return store?.default_policy || 'log-only';
+}
+function intersect(a, b) { return a.filter(x => b.includes(x)); }
+async function trustGateCheck(payload) {
+  const store = loadTrustStore();
+  if (!('trust' in payload)) {
+    const policy = trustStoreDefaultPolicy(store);
+    logLine(policy === 'deny' ? 'err' : 'req', `trust: unsigned payload (default_policy=${policy})`);
+    return { verified: null, allowedActions: null, policy };
+  }
+  const trust = await tgVerifyPayload(payload);  // throws TrustError on failure
+  const storeActions = trustStoreAllowedActions(store, trust.producerId);
+  if (storeActions === null) {
+    const policy = trustStoreDefaultPolicy(store);
+    logLine('err', `trust: unknown producer ${trust.producerId.slice(0,12)}… (default_policy=${policy})`);
+    return { verified: trust, allowedActions: null, policy };
+  }
+  if (!replayCache.checkAndRecord(trust.producerId, trust.nonce, trust.expiresAt)) {
+    throw new TrustError('replay detected — payload nonce already seen this session', 'replay');
+  }
+  const allowed = intersect(trust.actions, storeActions);
+  logLine('res', `trust: verified ${trust.producerName || trust.producerId.slice(0,12)+'…'} · actions=${allowed.join(',') || '<empty>'}`);
+  return { verified: trust, allowedActions: allowed, policy: 'verified' };
+}
 
 const frame = document.getElementById('frame');
 const logEl = document.getElementById('log');
@@ -120,6 +255,22 @@ function saveCfg() {
   localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
 }
 
+// ---- Reference backend methods (RDR-001 §Item 7 first-class + extensions) ---
+//
+// Each method has three resolver paths a host can plug into:
+//   1. MOCK_BACKEND        — stub responses for local development / demo
+//   2. HTTP_BACKEND(url)   — POST to a sidecar HTTP service (e.g. nexus daemon
+//                             on http://localhost:PORT)
+//   3. window.hostBridgeResolver — a JS object the embedder injects to route
+//                             through a custom channel (MCP tool call from a
+//                             Tauri host, an in-page WebSocket, etc.)
+//
+// `getBackend()` picks the first available in that order. Adding a new method
+// means adding handlers to BOTH MOCK_BACKEND and HTTP_BACKEND (so the demo
+// works out-of-the-box AND a real sidecar can serve it). The trust gate
+// (§trustGateCheck) is consulted before `handleRequest` dispatches to whichever
+// backend is active, so all methods inherit the same per-producer policy.
+
 const MOCK_BACKEND = {
   async openChash({ chash }) {
     return {
@@ -128,7 +279,24 @@ const MOCK_BACKEND = {
     };
   },
   async runSkill({ name, args }) {
+    // Nexus-style skill dispatch. Params: {name: string, args?: object}.
+    // Result: {result: string | object}. Hosts that bridge to a real
+    // nexus daemon should fetch from {baseUrl}/skill/{name} with args
+    // as the POST body — see HTTP_BACKEND.runSkill.
     return { result: `[mock] skill ${name} called with ${JSON.stringify(args)}` };
+  },
+  async openFile({ path, line, column }) {
+    // Editor-host file-open dispatch. Params: {path: string, line?: number,
+    // column?: number}. A real editor-host (VS Code webview, Cursor, JetBrains
+    // remote) would route this to its own openTextDocument / revealRange API.
+    // The mock just echoes the would-be-action so the demo log shows what the
+    // bridge received.
+    const loc = line != null ? `:${line}${column != null ? ':' + column : ''}` : '';
+    return {
+      opened: false,
+      reason: 'mock-backend',
+      message: `[mock] would open ${path}${loc} — replace MOCK_BACKEND.openFile with a real editor-host resolver to actually open it`,
+    };
   },
 };
 
@@ -145,6 +313,15 @@ const HTTP_BACKEND = (baseUrl) => ({
       body: JSON.stringify(args || {}),
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${baseUrl}/skill/...`);
+    return await resp.json();
+  },
+  async openFile({ path, line, column }) {
+    const resp = await fetch(`${baseUrl}/file/open`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, line, column }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} from ${baseUrl}/file/open`);
     return await resp.json();
   },
 });
@@ -175,6 +352,60 @@ function updateStatus() {
 async function handleRequest(m) {
   const { backend, label } = getBackend();
   logLine('req', `→ ${m.method} ${JSON.stringify(m.params).slice(0, 80)}`);
+
+  // Trust-gate (RDR-004 §Item 4 step 7): gate every a2ui.request based on
+  // the trust state captured at loadSurface time.
+  //
+  // Three states matter:
+  //   (A) verified + known producer (verifiedActions is a list, possibly empty)
+  //       → enforce trust.actions ∩ trustStore[producerId].allowed_actions
+  //   (B) verified signature BUT producer not in trust store
+  //       (verifiedTrust set, verifiedActions === null)
+  //       → bridge-routed methods denied under any policy except "allow";
+  //         RDR-004 §Item 5 says "log-only … bridge-routed methods are denied
+  //         with a modal explaining the missing-trust state".
+  //   (C) unsigned payload (verifiedTrust === null)
+  //       → apply default_policy: deny refuses, log-only warns + denies
+  //         bridge-routed methods, allow lets everything through.
+  const policy = trustStoreDefaultPolicy(loadTrustStore());
+  if (verifiedTrust && verifiedActions !== null) {
+    // (A) known producer with an action allowlist
+    if (!verifiedActions.includes(m.method)) {
+      logLine('err', `← trust deny: ${m.method} not in producer's allowlist (${verifiedActions.join(',') || '<empty>'})`);
+      frame.contentWindow.postMessage({
+        type: 'a2ui.response', requestId: m.requestId,
+        error: `Action '${m.method}' not permitted for producer ${verifiedTrust.producerName || verifiedTrust.producerId.slice(0,12)+'…'}`,
+      }, '*');
+      return;
+    }
+  } else if (verifiedTrust && verifiedActions === null && policy !== 'allow') {
+    // (B) signed by an unknown producer — deny bridge-routed methods unless policy='allow'
+    logLine('err', `← trust deny: unknown producer ${verifiedTrust.producerId.slice(0,12)}… (default_policy=${policy})`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: `Action '${m.method}' denied: producer ${verifiedTrust.producerId.slice(0,12)}… is not in the trust store (default_policy=${policy})`,
+    }, '*');
+    return;
+  } else if (verifiedTrust === null && policy === 'deny') {
+    // (C) unsigned + deny policy — refuse all bridge-routed methods
+    logLine('err', `← trust deny: unsigned payload + default_policy=deny`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: 'Bridge-routed methods denied: no trust signature and default_policy=deny',
+    }, '*');
+    return;
+  } else if (verifiedTrust === null && policy === 'log-only') {
+    // (C) unsigned + log-only — deny bridge-routed methods per RDR-004 §Item 7;
+    // renderer-local actions (openUrl, copyToClipboard) bypass the bridge so
+    // they continue to execute.
+    logLine('err', `← trust deny: unsigned payload + default_policy=log-only (bridge-routed methods disabled)`);
+    frame.contentWindow.postMessage({
+      type: 'a2ui.response', requestId: m.requestId,
+      error: `Action '${m.method}' denied: no trust signature (default_policy=log-only — bridge-routed methods disabled)`,
+    }, '*');
+    return;
+  }
+  // verifiedTrust === null && policy === 'allow' → fall through (development mode)
 
   if (!backend) {
     logLine('err', `← no backend configured (${label})`);
@@ -296,7 +527,25 @@ function startRetry() {
 }
 
 window.a2uiHostBridge = {
-  loadSurface(payload) {
+  async loadSurface(payload) {
+    // Trust-gate (RDR-004 §Item 4 steps 1-6): verify the payload's
+    // signature, cross-check producerId, look up the producer in the
+    // local trust store, check freshness, check replay. Outcome stored
+    // in verifiedTrust / verifiedActions for use by handleRequest.
+    try {
+      const r = await trustGateCheck(payload);
+      verifiedTrust = r.verified;
+      verifiedActions = r.allowedActions;
+      if (r.policy === 'deny' && verifiedTrust === null) {
+        logLine('err', 'trust: load refused (unsigned + default_policy=deny)');
+        return;
+      }
+    } catch (err) {
+      verifiedTrust = null;
+      verifiedActions = null;
+      logLine('err', `trust: ${err.kind || 'error'} — ${err.message}`);
+      return;  // never deliver a payload that failed verification
+    }
     pendingLoad = payload;
     if (rendererReady) deliverPending();
     else startRetry();
@@ -310,6 +559,9 @@ window.a2uiHostBridge = {
     window.hostBridgeResolver = resolver;
     updateStatus();
   },
+  // Operator helpers — set/clear the trust store from console for testing.
+  setTrustStore(store) { localStorage.setItem(TRUST_KEY, JSON.stringify(store)); logLine('req', 'trust store updated'); },
+  getTrustStore() { return loadTrustStore(); },
 };
 </script>
 </body>
