@@ -2,12 +2,12 @@
 title: "palinex Architecture: a2ui v0.9 IR, SurfaceBroker Port, Three Delivery Shapes, postMessage Host Bridge"
 id: RDR-001
 type: Architecture
-status: draft
+status: accepted
 priority: high
 author: Hal Hildebrand
 reviewed-by: self
 created: 2026-05-22
-accepted_date:
+accepted_date: 2026-05-23
 related_rdrs: []
 related_external: [a2ui-v0.9-spec, mcp-ui-resources, lit-html]
 ---
@@ -46,8 +46,8 @@ A small Python package + one HTML file + one host-bridge wrapper. No framework, 
 ### Technical environment
 
 - **a2ui v0.9 spec**: <https://a2ui.org/specification/v0.9-a2ui/> — Apache-2.0, four message types, 18 Basic Catalog components, JSON Schema validation, per-version structural backward-compat via `v0_8/`, `v0_9/`, `v0_10/` directories upstream.
-- **Renderer host (primary)**: Claude Code via MCP UI resources. Sandboxed iframe with postMessage channel back to the host.
-- **Renderer host (secondary)**: any browser. `file://` works; GitHub Pages hosts the canonical renderer at `https://hellblazer.github.io/palinex/`.
+- **Renderer host (primary, partially supported as of 2026-05-23)**: Claude Code via MCP UI resources. Sandboxed iframe with postMessage channel back to the host. **Known limitation:** Claude Code *Desktop* (v2.1.149 verified) does not currently render `ui://`-scheme HTML resources as inline iframes — the resource envelope returns but the host displays it as text rather than mounting it. The MCP UI resource shape works in hosts that do mount such resources (Claude.ai web client, custom MCP UI hosts). Until Desktop adds inline rendering, producers targeting Desktop should rely on the *embedded artifact* or *external URL* delivery shapes (Item 4) for visible output.
+- **Renderer host (secondary, fully supported)**: any browser. `file://` works; GitHub Pages hosts the canonical renderer at `https://hellblazer.github.io/palinex/`. This is the de-facto primary target as of 0.2.0 given the Desktop limitation above.
 - **Renderer host (future)**: custom web shells, Tauri apps, terminal hosts (notcurses).
 
 ### Constraints
@@ -96,17 +96,19 @@ Renderer features:
 - Dark mode via `prefers-color-scheme`.
 - Debug pane showing component count + raw JSON.
 
-Size target: ~700 LOC (warn at 500 per `html-tool-patterns` discipline; current size 708). Bloat would indicate the design has lost coherence.
+Size target: ~700 LOC (warn at 500 per `html-tool-patterns` discipline). Current size 845 — past the original 700 target after Phase 2 (Tabs/DateTimeInput/Video/AudioPlayer) and the `a2ui.ready` handshake added incremental dispatch and bootstrapping code. A future minor should evaluate whether the 18-component dispatch warrants a small helper module or whether the inline approach still earns its single-file simplicity. Treat 1000 LOC as a hard ceiling that triggers a refactor.
 
 **Item 4: Three delivery shapes.**
 
-| Shape | Host | Mechanism |
-|---|---|---|
-| **MCP UI resource** | Claude Code | Tool returns `{type: "resource", resource: {uri: "ui://...", mimeType: "text/html"}}` wrapping the renderer + payload |
-| **Embedded artifact** | Any chat host | HTML returned inline with payload as `<script type="application/json">` and renderer pulled from `hellblazer.github.io/palinex/` via CDN-style URL |
-| **External URL** | Any browser | `https://hellblazer.github.io/palinex/?payload=<base64>` for shareable links |
+| Shape | Host | Mechanism | Producer-side helper |
+|---|---|---|---|
+| **MCP UI resource** | Claude Code, claude.ai, custom MCP UI hosts | Tool returns `{type: "resource", resource: {uri: "ui://...", mimeType: "text/html"}}` wrapping the renderer + payload | `wrap_as_mcp_ui_resource(payload, ...)` |
+| **Embedded artifact** | Any chat host | HTML returned inline with payload as `<script type="application/json">` and renderer pulled from `hellblazer.github.io/palinex/` via iframe | none yet — callers construct the wrapper HTML directly using the same bootstrap shape as `wrap_as_mcp_ui_resource`; promoting to a helper is straightforward future work |
+| **External URL** | Any browser | `https://hellblazer.github.io/palinex/?payload=<base64>` for shareable links | none yet — callers do `base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()` and append to the renderer URL; promoting to a helper is straightforward future work |
 
-Default: caller picks based on host capability advertisement (MCP-aware → resource; chat host → embedded; CLI → URL). All three shapes carry the same a2ui v0.9 payload.
+The only first-class producer helper in v0.2.0 is `wrap_as_mcp_ui_resource`. The other two shapes are documented conventions a caller can construct manually with stdlib; they're listed here as supported delivery paths rather than supported APIs. If multi-shape adoption picks up they'll graduate to helpers in a future minor.
+
+Caller chooses shape based on out-of-band knowledge of the host (does it mount `ui://` HTML inline? does it accept arbitrary HTML artifacts?), not a programmatic capability query — no such query exists in MCP today. **Note:** "MCP-aware → resource" is *not* a safe default given the Desktop limitation in §Context; pick the resource shape only when the host is known to mount `ui://` HTML inline (claude.ai web, custom MCP UI hosts), otherwise prefer external URL or embedded artifact.
 
 **Item 5: Markdown sidecar always.**
 
@@ -141,6 +143,22 @@ Renderer timeout is 10s default. Visible failure mode: modal panel showing the e
 
 Configuration: hosts can push config to the renderer via `{type: "a2ui.config", config: {daemonBase: "...", ...}}`. Stored in `localStorage` for the renderer to use across loads.
 
+#### Delivery robustness — retry-until-ack handshake
+
+The naïve wrapper bootstrap (single `postMessage` gated on `frame.contentDocument.readyState === 'complete'`) is broken by two races and **must not be reused**:
+
+- **Race A — early delivery to about:blank.** A freshly-created cross-origin iframe presents an initial `about:blank` document that is same-origin with the wrapper and trivially `readyState === 'complete'`. A `readyState`-gated check fires `postMessage` against `about:blank`, which has no listener; the payload is dropped before the real renderer navigates.
+- **Race B — late listener attach.** When the renderer is cached and already loaded by the time the bootstrap runs, `contentDocument` is `null` (now cross-origin), so the script falls through to `addEventListener('load', ...)`. But `load` already fired; the listener never runs.
+
+**Required discipline:**
+
+1. **Wrapper always attaches `load` listener** for the deliver function — covers Race A (real renderer load).
+2. **Wrapper runs a bounded retry loop** (~150 ms × ~40 attempts ≈ 6 s) that re-posts the payload — covers Race B. `setSurface` is idempotent, so repeated delivery is safe.
+3. **Renderer posts `{type: "a2ui.ready"}` to `window.parent`** immediately after attaching its `message` listener.
+4. **Wrapper stops retrying on receipt of `a2ui.ready`** — keeps the common path one round-trip.
+
+This is the actual delivery contract of `wrap_as_mcp_ui_resource`. Any new wrapper (Tauri host, custom web shell, an HTTP sidecar's index page) must implement the same retry-until-ack pattern, not the readyState gate. The retry-until-ack handshake landed in palinex 0.2.0 after the race-prone wrapper shipped in 0.1.0 produced silent empty surfaces in warm-cache iframes.
+
 **Item 7: Action allowlist for v1.**
 
 Three actions are first-class in v1:
@@ -167,10 +185,11 @@ This is the reference implementation of Item 6. Real hosts (Claude Code, Tauri s
 **Item 9: Distribution and release flow.**
 
 - Repo: `https://github.com/Hellblazer/palinex` (Apache-2.0)
-- PyPI: `palinex` (`pip install palinex`); optional `palinex[validate]` adds jsonschema
-- Renderer hosted: `https://hellblazer.github.io/palinex/` (GitHub Pages)
+- PyPI: `palinex` (`pip install palinex`); optional `palinex[validate]` adds jsonschema, optional `palinex[mcp]` adds the FastMCP server entry point used by the .mcpb bundle below
+- Renderer hosted: `https://hellblazer.github.io/palinex/` (GitHub Pages; Pages workflow auto-deploys `web/**` on push to `main`)
+- Claude Desktop `.mcpb` bundle: `mcpb/` directory builds a Claude Desktop extension that vendors a uv-managed `.venv` pulling `palinex[mcp]>=<version>`. Currently installed via Claude Desktop's "Install extension" UI; bundle versioning tracks palinex versioning. **Caveat:** the bundle's `manifest.json` description claims inline rendering in Claude Desktop, which is not yet supported (see §Context A1); description should be updated to reflect that the bundle provides the MCP server only and inline rendering requires a host that mounts `ui://` resources.
 - Release: tag-triggered (`v*`) GitHub Actions workflow with OIDC trusted publisher to PyPI + GitHub Release with sdist/wheel attached
-- CI: pytest matrix on Python 3.10–3.13 plus build check on every PR/push
+- CI: pytest matrix on Python 3.12–3.13 plus build check on every PR/push (requires-python is `>=3.12`)
 - Versioning: palinex semver tracks a2ui versions it supports. v0.0.x is alpha; v0.x.y will track a2ui v0.9; v1.x.y will track a2ui v1.0 if/when it ships.
 
 ## Alternatives Considered
@@ -198,6 +217,15 @@ Instead of postMessage RPC to a host bridge, the renderer could open a WebSocket
 
 Microsoft-maintained, more mature, large renderer ecosystem. Rejected because Adaptive Cards is *card-native* (single card per payload) while palinex's target use cases (`nx_answer` synthesis with citations list, subagent findings, RDR audit dashboards) are *surface-native* (multi-component coordinated). a2ui fits the shape; Adaptive Cards doesn't.
 
+### Alt 6: `srcdoc` or `blob:` iframes to dodge the about:blank race
+
+The 0.1.0 → 0.2.0 about:blank race fix (Item 6 "Delivery robustness") prompted reconsidering whether `<iframe src="https://hellblazer.github.io/palinex/">` is the right transport at all. Two same-origin alternatives:
+
+- **`srcdoc`** — inline the renderer HTML in the wrapper's `<iframe srcdoc="...">`. Avoids the cross-origin nav, eliminates Race A entirely. Rejected because (a) `srcdoc` content is treated as same-origin with the parent, which means the rendered surface inherits the host's CSP and storage origin — undesirable for sandboxing; (b) duplicates the renderer HTML on every emission (~30KB × N surfaces in a session); (c) loses the canonical-URL story for caching and the "open in browser" external-URL shape.
+- **`blob:` URL** — render the wrapper into a `Blob`, mint a `URL.createObjectURL(blob)`, point the iframe at that. Same-origin with the wrapper. Avoids Race A. Rejected because (a) blob URLs are session-scoped and ephemeral, breaking the "share URL" delivery shape; (b) cross-origin sandboxing semantics differ from a hosted https origin and downstream hosts vary in how they treat blob iframes under CSP; (c) doesn't help with the warm-cache case (Race B) which the retry loop addresses anyway.
+
+The retry-until-ack handshake (Item 6) addresses both races without giving up the canonical hosted-renderer URL. Re-evaluate `srcdoc` if a host emerges that enforces strict CSP on `frame-src` excluding `hellblazer.github.io`.
+
 ### Briefly rejected
 
 - **JSON Schema "Form"** standard — narrower scope (input forms only)
@@ -215,7 +243,7 @@ Microsoft-maintained, more mature, large renderer ecosystem. Rejected because Ad
 - **(+)** Host-bridge protocol is small (one request/response shape) and generalizes to any host that can postMessage
 - **(−)** External dependency on a2ui v0.9 spec; v0.10 may require palinex major bump
 - **(−)** Single-maintainer bus factor; mitigated by Apache-2.0 + small surface area
-- **(−)** Renderer size (~700 LOC) is near the `html-tool-patterns` discipline ceiling; further feature growth needs careful design
+- **(−)** Renderer size (~845 LOC) is past the originally-stated 700 LOC target; hard ceiling 1000 LOC. Further feature growth needs careful design or a structured refactor (see Item 3)
 
 ### Risks and Mitigations
 
@@ -252,7 +280,7 @@ Microsoft-maintained, more mature, large renderer ecosystem. Rejected because Ad
 - [x] `palinex/__init__.py` — Surface builder with 14 components, DataPath/FunctionCall/Event helpers, validation, markdown sidecar
 - [x] `index.html` — single-file renderer covering 14 components, three load paths, host-bridge protocol, dark mode, debug pane
 - [x] `host-bridge.html` — reference wrapper implementing the `a2ui.request`/`a2ui.response` protocol
-- [x] `tests/` — 19 pytest tests covering envelope shape, action shapes, validation gates, markdown round-trip, template ChildList
+- [x] `tests/` — 53 pytest tests across `test_builders.py`, `test_mcp_server.py`, `test_nexus_bridge.py` covering envelope shape, action shapes, validation gates, markdown round-trip, template ChildList, MCP server tool surface, optional nexus chash resolution
 - [x] `pyproject.toml` — hatchling build, optional `[validate]` extra, dev group
 - [x] `.github/workflows/ci.yml` — pytest matrix on 3.10–3.13 + build check
 - [x] `.github/workflows/release.yml` — tag-triggered OIDC trusted publisher + GitHub Release with artifacts
@@ -261,14 +289,14 @@ Microsoft-maintained, more mature, large renderer ecosystem. Rejected because Ad
 - [x] `LICENSE` — Apache-2.0
 - [x] palinex 0.0.1 released to PyPI 2026-05-22
 
-### Phase 2: Remaining Basic Catalog components
+### Phase 2: Remaining Basic Catalog components (shipped in 0.2.0)
 
-- [ ] Tabs (titles + children)
-- [ ] DateTimeInput (ISO 8601 value, optional min/max, date/time toggles)
-- [ ] Video (URL + minimal controls)
-- [ ] AudioPlayer (URL + description)
+- [x] Tabs (titles + children)
+- [x] DateTimeInput (ISO 8601 value, optional min/max, date/time toggles)
+- [x] Video (URL + minimal controls)
+- [x] AudioPlayer (URL + description)
 
-Each follows the same dispatch pattern as the existing 14 — no architectural change. Ships as palinex 0.0.2 through the existing release workflow.
+All four followed the dispatch pattern established by the original 14. `BASIC_COMPONENTS` (`src/palinex/__init__.py`) now lists all 18 v0.9 Basic Catalog components; the renderer dispatches all 18. Shipped alongside Phase 1 in palinex 0.2.0 rather than the originally-planned 0.0.2 release.
 
 ### Phase 3: Action registry hardening
 
@@ -311,7 +339,7 @@ If/when palinex needs to target hosts beyond Claude Code's MCP UI resource (Taur
 
 ### Testing strategy
 
-19 pytest tests cover the producer; CI matrix runs them on Python 3.10–3.13 for every PR and push. Renderer is browser-tested manually for v1; future Playwright tests would drive the renderer with payloads from the producer test corpus and assert DOM output.
+53 pytest tests across three modules (29 in `test_builders.py`, 11 in `test_mcp_server.py`, 13 in `test_nexus_bridge.py`) cover the producer, the MCP server's `render_surface` tool, and the optional nexus bridge. CI matrix runs them on Python 3.12 and 3.13 for every PR and push. Renderer is browser-tested manually for v1; future Playwright tests would drive the renderer with payloads from the producer test corpus and assert DOM output.
 
 ### Performance expectations
 
@@ -323,26 +351,46 @@ If/when palinex needs to target hosts beyond Claude Code's MCP UI resource (Taur
 
 ## Finalization Gate
 
-(deferred — sketch only)
+Ran 2026-05-23 prior to accepting RDR-001 alongside the palinex 0.2.0 release.
 
 ### Contradiction check
 
-(deferred)
+Items reviewed against the shipped code in palinex 0.2.0:
+
+- **Item 1 (a2ui v0.9 as IR):** matches. `Surface` builds v0.9 envelopes; no parallel IR.
+- **Item 2 (typed Python builders + validation):** matches. 14 builders ship; `Surface.validate()` enforces structural rules; `[validate]` extra adds jsonschema.
+- **Item 3 (single-file renderer):** matches. `web/index.html` is one file, lit-html from pinned CDN, 14 components, all renderer features ship.
+- **Item 4 (three delivery shapes):** matches. `wrap_as_mcp_ui_resource` + embedded artifact + `?payload=` URL.
+- **Item 5 (markdown sidecar always):** matches. `Surface.to_markdown()` covers all 14 component types.
+- **Item 6 (postMessage RPC host bridge):** **previously contradicted by the wrapper's race-prone single-shot delivery shipped in 0.1.0** AND by `web/host-bridge.html` lacking the retry-until-ack pattern that the contract requires of "any new wrapper". Both resolved on this branch: `wrap_as_mcp_ui_resource` retry-until-ack landed in 0.2.0; `host-bridge.html` retry-until-ack landed in the acceptance branch alongside this gate. RDR now describes the actual contract and the reference bridge demonstrates it.
+- **Item 7 (action allowlist):** matches. `openUrl`, `copyToClipboard`, `openChash` ship; others routed through the bridge.
+- **Item 8 (reference host-bridge wrapper):** matches *after* the host-bridge update above. Previously the reference implementation did not demonstrate the contract it referenced.
+- **Item 9 (distribution and release flow):** matches with two corrections from initial draft — the `.mcpb` Claude Desktop bundle is now listed (it shipped in 0.2.0 but the original draft predated it), and the CI matrix is `3.12-3.13` per `pyproject.toml` `requires-python = ">=3.12"` (not `3.10-3.13` as originally written; the broader range was aspirational and never enforced).
+
+No outstanding contradictions.
 
 ### Assumption verification
 
-- [ ] **A1** — Claude Code MCP UI resource rendering is stable across the embedded artifact and resource shapes.
-  **Method:** smoke test in Claude Code with a representative payload.
-- [ ] **A2** — palinex's structural validation catches the producer errors that matter on a representative corpus.
-  **Method:** mutation-test the demo payload (drop required fields, dangle refs, invalid variants).
-- [ ] **A3** — Markdown sidecar is genuinely lossless for the surfaces nexus producers emit.
-  **Method:** round-trip 100 representative nx_answer outputs.
-- [ ] **A4** — postMessage RPC timeout (10s) is appropriate for typical host backends.
-  **Method:** measure round-trip latency for chash resolution through Claude Code MCP and through HTTP sidecar.
+- [x] **A1** — Claude Code MCP UI resource rendering. **Partially verified, partially falsified.**
+  - **Verified:** the wrapper HTML produced by `wrap_as_mcp_ui_resource` renders correctly when opened in a browser (Safari 18 on macOS 14 verified 2026-05-23) — surface displays, host-bridge protocol routes correctly, retry-until-ack handshake observed.
+  - **Falsified:** Claude Code Desktop (v2.1.149 verified 2026-05-23) does not mount `ui://` HTML resources as inline iframes; the resource envelope is returned but the host renders it as text. Documented as a known limitation in §Context. Producers targeting Desktop should use the embedded artifact or external URL shapes until this is addressed upstream.
+
+- [ ] **A2** — Structural validation catches producer errors. **Deferred to follow-up.**
+  - Rationale: 19 pytest tests cover the cases observed during 0.1.0/0.2.0 development; a mutation-test pass against a representative corpus is worth doing once nexus integration produces a corpus large enough to be representative. Not a blocker for accepting the architecture.
+
+- [ ] **A3** — Markdown sidecar lossless on 100 nx_answer outputs. **Deferred to follow-up.**
+  - Rationale: no production corpus of nx_answer surface outputs exists yet (nexus is still producing markdown, not surfaces). Re-evaluate after RDR-127's pilot producers ship.
+
+- [x] **A4** — 10s postMessage timeout is appropriate. **Verified for the current host set.**
+  - GitHub Pages renderer cold load + `a2ui.ready` ack arrives well under 6s (observed ~1–2s on warm connections). Retry-until-ack budget (6s) sits inside the 10s timeout. Real MCP-backed chash resolution latency not yet measured against the production nx store — defer remeasurement to RDR-127's pilot.
 
 ### Scope verification
 
-(deferred — this RDR covers only palinex itself; downstream integrations are their own RDRs)
+- The RDR's scope is **palinex itself only** — producer library, renderer, host-bridge protocol, delivery shapes, packaging.
+- Downstream integrations (nexus's `nx_answer` adoption, subagent surface emission, Tauri/notcurses hosts) are explicitly out of scope and tracked by their own RDRs (nexus RDR-127 et al).
+- Phase 2 (remaining Basic Catalog components) and Phase 3 (action registry hardening) are explicit follow-up phases of *this* RDR — they ship under the architecture accepted here, no architectural change.
+
+No silent scope reduction. The known scope reduction (A2/A3 deferred) is explicit above.
 
 ### Cross-cutting concerns
 
@@ -378,3 +426,20 @@ Small RDR. The IR is a2ui (external, adopted). Producer + renderer + bridge are 
 ## Revision History
 
 _2026-05-22 — initial sketch. Captures the architecture that shipped as palinex 0.0.1 to PyPI on the same day. The RDR codifies a working implementation rather than proposing one; design discussion happened in conversation 2026-05-20 through 2026-05-22 with the nexus project's user (Hal Hildebrand) and landed in code first._
+
+_2026-05-23 — accepted alongside the palinex 0.2.0 release. Amendments before acceptance, in two passes:_
+
+_First pass (initial acceptance attempt):_
+- _Item 6 amended with the "Delivery robustness — retry-until-ack handshake" subsection documenting the about:blank race that affected 0.1.0 and the handshake shipped in 0.2.0._
+- _§Context "Technical environment" amended to qualify A1: Claude Code Desktop v2.1.149 does not currently render `ui://` HTML resources inline; embedded artifact and external URL shapes are the working delivery paths for Desktop until that lands._
+- _Finalization Gate populated with contradiction check, assumption verification (A1 partial / A2,A3 deferred / A4 verified), scope verification._
+
+_Second pass (post-critique corrections — a substantive-critic agent caught four critical doc-vs-code contradictions in the first-pass amendments):_
+- _Phase 2 components (Tabs, DateTimeInput, Video, AudioPlayer) marked shipped — they had landed in 0.2.0 but the Implementation Plan still showed them as unchecked future work._
+- _`web/host-bridge.html` updated to actually implement the retry-until-ack discipline that Item 6 says "any new wrapper must implement". The reference implementation previously called bare `postMessage` and would have silently re-introduced the warm-cache race in downstream wrappers that copied it._
+- _Item 4 corrected to reflect that only `wrap_as_mcp_ui_resource` exists as a producer-side helper; embedded-artifact and external-URL shapes are documented conventions a caller constructs with stdlib. The "host capability advertisement" paragraph was misleading (no such MCP query exists) and was replaced with an accurate description, including a callout that "MCP-aware → resource" is not a safe default for Desktop._
+- _§Distribution amended to list the `.mcpb` Claude Desktop bundle (which shipped in 0.2.0 alongside the merge from develop). `mcpb/manifest.json` description corrected to remove the claim that Desktop renders surfaces inline (it doesn't, per A1)._
+- _Test count corrected (19 → 53 across 3 modules), CI matrix corrected (3.10-3.13 → 3.12-3.13 per requires-python), renderer LOC updated (708 → 845 with a refactor ceiling at 1000)._
+- _§Alternatives Considered extended with Alt 6 covering `srcdoc` and `blob:` iframe alternatives that were implicit considerations during the 0.1.0 → 0.2.0 fix cycle._
+
+_Phase 3 (action registry hardening) remains future scope under this accepted architecture. Phase 2 is now complete._

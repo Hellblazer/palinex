@@ -256,12 +256,55 @@ document.getElementById('banner-focus').addEventListener('click', () => {
 updateStatus();
 logLine('req', `host bridge ready · renderer: ${frame.src}`);
 
+// Retry-until-ack delivery — implements the discipline specified in
+// palinex RDR-001 §Item 6 "Delivery robustness". A caller may invoke
+// loadSurface() at any time, including before the inner renderer has
+// finished navigating (about:blank race) or after it has already loaded
+// (warm-cache race). Queue payloads, deliver on every relevant signal,
+// stop retrying when the renderer posts a2ui.ready.
+let rendererReady = false;
+let pendingLoad = null;
+let pendingConfig = null;
+let loadRetryTimer = null;
+function deliverPending() {
+  if (pendingLoad !== null) {
+    frame.contentWindow.postMessage({ type: 'a2ui.load', payload: pendingLoad }, '*');
+  }
+  if (pendingConfig !== null) {
+    frame.contentWindow.postMessage({ type: 'a2ui.config', config: pendingConfig }, '*');
+  }
+}
+window.addEventListener('message', (e) => {
+  if (e.source === frame.contentWindow && e.data && e.data.type === 'a2ui.ready') {
+    rendererReady = true;
+    if (loadRetryTimer !== null) { clearInterval(loadRetryTimer); loadRetryTimer = null; }
+    deliverPending();
+  }
+});
+frame.addEventListener('load', () => {
+  // load event fires for each navigation including the initial src commit
+  if (pendingLoad !== null || pendingConfig !== null) deliverPending();
+});
+function startRetry() {
+  if (loadRetryTimer !== null) return;
+  let attempts = 0;
+  loadRetryTimer = setInterval(() => {
+    if (rendererReady) { clearInterval(loadRetryTimer); loadRetryTimer = null; return; }
+    deliverPending();
+    if (++attempts >= 40) { clearInterval(loadRetryTimer); loadRetryTimer = null; }  // ~6s budget
+  }, 150);
+}
+
 window.a2uiHostBridge = {
   loadSurface(payload) {
-    frame.contentWindow.postMessage({ type: 'a2ui.load', payload }, '*');
+    pendingLoad = payload;
+    if (rendererReady) deliverPending();
+    else startRetry();
   },
   setConfig(config) {
-    frame.contentWindow.postMessage({ type: 'a2ui.config', config }, '*');
+    pendingConfig = config;
+    if (rendererReady) deliverPending();
+    else startRetry();
   },
   setResolver(resolver) {
     window.hostBridgeResolver = resolver;

@@ -4,8 +4,8 @@
   "name": "palinex",
   "display_name": "Palinex",
   "version": "0.2.0",
-  "description": "Render a2ui v0.9 surfaces inline in Claude Desktop as sandboxed iframes.",
-  "long_description": "Palinex wraps a2ui v0.9 surface payloads as MCP UI resources so Claude Desktop renders them inline. Exposes a single tool, render_surface, that takes a surface payload and returns a ui:// resource pointing at the palinex renderer. Optional nexus integration resolves chash references in the payload against nexus T3 when conexus is also installed.",
+  "description": "MCP server exposing render_surface — wraps a2ui v0.9 payloads as ui:// MCP UI resources.",
+  "long_description": "Palinex wraps a2ui v0.9 surface payloads as MCP UI resources. Exposes a single tool, render_surface, that takes a surface payload and returns a ui:// resource pointing at the palinex renderer hosted at hellblazer.github.io/palinex. Hosts that mount ui:// HTML resources as inline iframes (claude.ai web, custom MCP UI hosts) display the rendered surface; Claude Desktop currently returns the resource envelope as text rather than mounting it inline — use the embedded-artifact or external-URL delivery shapes documented in palinex RDR-001 §Item 4 for Desktop until that lands. Optional nexus integration resolves chash references in the payload against nexus T3 when nexus is also installed.",
   "author": {
     "name": "Hal Hildebrand",
     "url": "https://github.com/Hellblazer"
