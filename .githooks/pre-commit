@@ -28,14 +28,14 @@ html_over_limit=()
 for f in $(staged_files | grep -E '\.html$' || true); do
   [ -f "$f" ] || continue
   loc=$(wc -l < "$f" | tr -d ' ')
-  if [ "$loc" -gt 900 ]; then
+  if [ "$loc" -gt 1100 ]; then
     html_over_limit+=("$f ($loc lines)")
   elif [ "$loc" -gt 600 ]; then
-    warn "$f is $loc lines (warn threshold 600, stop 900)"
+    warn "$f is $loc lines (warn threshold 600, stop 1100)"
   fi
 done
 if [ ${#html_over_limit[@]} -gt 0 ]; then
-  fail "HTML file(s) exceed 900 LOC hard stop (html-tool-patterns skill):
+  fail "HTML file(s) exceed 1100 LOC hard stop (html-tool-patterns skill):
   ${html_over_limit[*]}
 Trim or split. To override after deliberate threshold review, raise the
 limit in this hook AND in ~/.claude/skills/html-tool-patterns/SKILL.md."

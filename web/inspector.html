@@ -58,6 +58,17 @@
   }
   .panel-title .count { font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0; }
   .panel-body { overflow: auto; max-height: 520px; }
+  .tabs { display: flex; gap: 0; margin-right: auto; }
+  .tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 2px 8px; color: var(--muted); cursor: pointer; font: inherit;
+    font-size: 12px; font-weight: 500; text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--fg); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content.hidden { display: none; }
+  [data-tab-visible].hidden { display: none; }
 
   .error {
     border-left: 3px solid var(--danger); padding: 6px 10px;
@@ -195,15 +206,33 @@
 
   <div class="col">
     <div class="panel">
-      <div class="panel-title">Markdown sidecar <span class="count" id="md-state">deep-only</span></div>
-      <div class="panel-body">
+      <div class="panel-title">
+        <span class="tabs" role="tablist">
+          <button class="tab active" data-tab="markdown" role="tab">Markdown</button>
+          <button class="tab" data-tab="paths" role="tab">Paths <span class="count" id="path-count"></span></button>
+          <button class="tab" data-tab="live" role="tab">Live render</button>
+        </span>
+        <span class="count" id="md-state" data-tab-visible="markdown">deep-only</span>
+      </div>
+
+      <div class="panel-body tab-content" data-tab="markdown">
         <pre class="code" id="markdown-view"><span style="color: var(--muted);">click "Validate (deep)" to render</span></pre>
       </div>
-    </div>
-    <div class="panel" style="flex: 1;">
-      <div class="panel-title">Data-path references <span class="count" id="path-count"></span></div>
-      <div class="panel-body" id="paths-panel">
+
+      <div class="panel-body tab-content hidden" data-tab="paths" id="paths-panel">
         <div class="empty" style="border: none; padding: 4px;"><span style="color: var(--muted);">no paths yet</span></div>
+      </div>
+
+      <div class="panel-body tab-content hidden" data-tab="live" id="live-panel">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <textarea class="a2ui-input" id="live-edit" rows="8" placeholder="paste an a2ui v0.9 payload or load one to begin"></textarea>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button id="btn-rerender" class="a2ui-btn primary" style="background: var(--accent); color: var(--accent-fg); border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">Re-render</button>
+            <button id="btn-reload-edit" style="font: inherit; background: transparent; border: 1px solid var(--border); color: var(--fg); padding: 4px 10px; border-radius: 4px; cursor: pointer;">Reset to loaded</button>
+            <span id="live-state" style="font-size: 12px; color: var(--muted); margin-left: auto;"></span>
+          </div>
+          <iframe id="live-frame" src="./index.html" style="width: 100%; height: 380px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg);"></iframe>
+        </div>
       </div>
     </div>
   </div>
@@ -851,6 +880,99 @@ document.getElementById('btn-url').addEventListener('click', showUrl);
 document.getElementById('btn-demo').addEventListener('click', () => ingest(DEMO_PAYLOAD, 'demo'));
 document.getElementById('btn-deep').addEventListener('click', runDeepValidate);
 document.getElementById('filter').addEventListener('change', (e) => { state.filter = e.target.value; rerender(); });
+
+// ---- right-column tab switching + live-render panel -----------------------
+
+function activateTab(name) {
+  for (const t of document.querySelectorAll('.tab')) {
+    t.classList.toggle('active', t.dataset.tab === name);
+  }
+  for (const c of document.querySelectorAll('.tab-content')) {
+    c.classList.toggle('hidden', c.dataset.tab !== name);
+  }
+  for (const v of document.querySelectorAll('[data-tab-visible]')) {
+    v.classList.toggle('hidden', v.dataset.tabVisible !== name);
+  }
+  if (name === 'live') populateLiveEdit();
+}
+
+for (const t of document.querySelectorAll('.tab')) {
+  t.addEventListener('click', () => activateTab(t.dataset.tab));
+}
+
+function populateLiveEdit() {
+  const ta = document.getElementById('live-edit');
+  if (!ta) return;
+  if (state.payload && ta.value.trim() === '') {
+    ta.value = JSON.stringify(state.payload, null, 2);
+  }
+}
+
+function postPayloadToLive(payload) {
+  const frame = document.getElementById('live-frame');
+  if (!frame || !frame.contentWindow) return;
+  try {
+    frame.contentWindow.postMessage({ type: 'a2ui.load', payload }, '*');
+    setLiveState('rendered ✓');
+  } catch (e) {
+    setLiveState(`postMessage failed: ${e.message}`);
+  }
+}
+
+function setLiveState(text) {
+  const el = document.getElementById('live-state');
+  if (el) el.textContent = text;
+}
+
+// When a fresh payload is ingested into the inspector, reflect it into the
+// live editor. Tap into the rerender pipeline.
+const _origRerender = rerender;
+window.rerender = function rerenderWithLive() {
+  _origRerender();
+  if (state.payload) {
+    const ta = document.getElementById('live-edit');
+    // Repopulate only if the user hasn't edited (empty or matches last
+    // ingested payload exactly).
+    if (ta && (ta.value.trim() === '' || ta.value === ta.dataset.lastIngested)) {
+      const json = JSON.stringify(state.payload, null, 2);
+      ta.value = json;
+      ta.dataset.lastIngested = json;
+    }
+    // If the Live tab is currently visible, push the new payload into
+    // the iframe immediately.
+    const liveActive = document.querySelector('.tab[data-tab="live"]')?.classList.contains('active');
+    if (liveActive) postPayloadToLive(state.payload);
+  }
+};
+// Replace the local rerender reference too so internal calls hit the wrapper
+rerender = window.rerender;
+
+document.getElementById('btn-rerender').addEventListener('click', () => {
+  const ta = document.getElementById('live-edit');
+  if (!ta || !ta.value.trim()) { setLiveState('empty payload'); return; }
+  let payload;
+  try {
+    payload = JSON.parse(ta.value);
+  } catch (e) {
+    setLiveState(`parse failed: ${e.message}`);
+    return;
+  }
+  postPayloadToLive(payload);
+});
+
+document.getElementById('btn-reload-edit').addEventListener('click', () => {
+  const ta = document.getElementById('live-edit');
+  if (!ta || !state.payload) return;
+  const json = JSON.stringify(state.payload, null, 2);
+  ta.value = json;
+  ta.dataset.lastIngested = json;
+  setLiveState('reset to loaded payload');
+});
+
+// When the iframe finishes loading, push the current payload (if any).
+document.getElementById('live-frame').addEventListener('load', () => {
+  if (state.payload) postPayloadToLive(state.payload);
+});
 
 // Drag and drop
 const main = document.getElementById('main');
